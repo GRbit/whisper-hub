@@ -1,0 +1,15 @@
+# whisperx itself comes from whisperx-nodeps.txt: its metadata pins numpy<2.1,
+# but the reference image runs it on numpy 2.4.6 and we match the reference.
+-r base.txt
+faster-whisper==1.2.1
+ctranslate2==4.8.1
+torch==2.7.1
+torchaudio==2.7.1
+numpy==2.4.6
+huggingface_hub==1.27.0
+av==15.1.0
+nltk==3.10.2
+pandas==2.2.3
+pyannote.audio==3.4.0
+transformers==5.14.1
+triton==3.7.1
