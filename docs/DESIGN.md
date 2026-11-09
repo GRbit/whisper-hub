@@ -28,8 +28,17 @@ clients --> gateway (Go, one static binary)            --> engine worker(s) (Pyt
   no ffmpeg. This also gives the gateway the audio duration for accounting.
 - A worker serves one engine and one or more models. Several workers can be
   attached (for example faster-whisper and whisperx in separate containers).
-- Shipping: an all-in-one image (gateway + faster-whisper worker, drop-in
-  replacement for the upstream image) and a split docker-compose setup.
+- Shipping: an all-in-one image per engine (`deploy/Dockerfile`, gateway +
+  worker, drop-in replacement for the upstream image), a gateway-only image
+  (`deploy/Dockerfile.gateway`), worker images (`worker/Dockerfile`), and
+  compose files for both setups. Both Go images ship upstream's ffmpeg build
+  (`onerahmet/ffmpeg:n7.1`), so uploads decode to the same PCM as upstream.
+- Supervision in the all-in-one image: the gateway is PID 1 and starts the
+  worker as its child (`internal/workerproc`, configured by `worker.command`).
+  Signals reach the process that knows the shutdown order (drain HTTP and
+  Wyoming, then stop the worker); the gateway exits when the worker dies,
+  so the container restarts. `ASR_ENGINE` unset means the image's engine; a
+  different one fails at startup naming the image that has it.
 
 ## Repository layout and ownership
 
@@ -40,9 +49,13 @@ clients --> gateway (Go, one static binary)            --> engine worker(s) (Pyt
 | `internal/openaiapi/` | openai | `/v1/audio/*`, `/v1/models` |
 | `internal/wyoming/` | wyoming | Wyoming codec and TCP server |
 | `internal/auth/` | auth | users, HTTP auth middleware, model ACL, usage accounting, request log |
-| `internal/hub/`, `internal/audio/`, `internal/workerclient/` | runtime | `core.Service` impl, scheduler, worker client, `core.AudioDecoder` |
+| `internal/hub/` | runtime | `core.Service` impl: worker registry, model resolution, scheduler, usage; the Worker API client is internal to it (`internal/hub/internal/workerclient`), the fake worker for tests is `internal/hub/workertest` |
+| `internal/audio/` | runtime | `core.AudioDecoder`: ffmpeg for files, pure Go PCM conversion |
+| `internal/config/` | integration | the whole configuration: YAML file, `WHISPER_HUB_*` env, upstream and sidecar variables, flags |
+| `internal/workerproc/` | integration | the worker child process of the all-in-one image |
 | `worker/` | worker | Python engine worker, its Dockerfiles and tests |
-| `cmd/`, `deploy/`, root files | runtime (integration phase) | main, config, images, compose, e2e |
+| `cmd/whisper-hub/` | integration | the binary: composes the modules (`serve`), `hash`, `apikey`, `config`, `healthcheck` |
+| `deploy/` | integration | Dockerfiles, compose files, example config, users file template, end-to-end scripts (`deploy/e2e`) |
 
 Each owner works in its own git worktree and edits only its own paths.
 `go.mod`/`go.sum` may be changed locally to add dependencies; list the
@@ -52,6 +65,8 @@ additions in the final report so they can be merged.
 
 - Depend on `internal/core` only (plus stdlib and a minimal set of third
   party modules). Frontends never import each other, the runtime or auth.
+  Only the composition layer (`cmd/whisper-hub`, `internal/config`) imports
+  the modules themselves; `main` composes and holds no logic.
 - Export a `Config` struct with `yaml` tags and documented defaults, and a
   constructor taking that config plus `core` interfaces. Do not read
   environment variables or files for configuration inside the package; the
@@ -209,7 +224,8 @@ Only the first 30 seconds are used, as upstream does.
   or a comma.
 - Comments explain why, not what; one or two lines. Exported identifiers get
   a doc comment starting with the identifier name.
-- Go logging: `log/slog`. Info for lifecycle and one brief line per job;
+- Go logging: `log/slog`. Info for lifecycle and one line per job, written
+  by the usage recorder (frontends and the hub log jobs at Debug);
   Debug for every step of an interaction (request parameters, outgoing HTTP
   calls, protocol events, queueing). Never log credentials or audio.
 - Python: stdlib `logging` with the same level discipline.
