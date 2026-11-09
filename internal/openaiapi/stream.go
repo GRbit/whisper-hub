@@ -72,7 +72,7 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request, req *core.Reques
 			return
 		}
 		ae := toAPIError(err)
-		log.Info("openai: stream failed", "status", ae.Status, "error", err.Error(),
+		log.Debug("openai: stream failed", "status", ae.Status, "error", err.Error(),
 			"elapsed", time.Since(start).Round(time.Millisecond))
 		if core.KindOf(err) == core.KindCanceled {
 			return
@@ -86,9 +86,9 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request, req *core.Reques
 		dur = req.Audio.Seconds()
 	}
 	if err := ev.send(doneEvent{Type: "transcript.text.done", Text: fullText(res), Usage: durationUsage(dur)}); err != nil {
-		log.Info("openai: stream client gone before done", "error", err.Error())
+		log.Debug("openai: stream client gone before done", "error", err.Error())
 		return
 	}
-	log.Info("openai: job done", "model", res.Model, "format", "stream", "audio_seconds", dur,
+	log.Debug("openai: job done", "model", res.Model, "format", "stream", "audio_seconds", dur,
 		"segments", len(res.Segments), "elapsed", time.Since(start).Round(time.Millisecond))
 }

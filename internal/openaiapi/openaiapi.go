@@ -142,7 +142,7 @@ func (s *Server) handleAudio(w http.ResponseWriter, r *http.Request, task core.T
 		}
 		writeJSON(w, http.StatusOK, out)
 	}
-	log.Info("openai: job done", "model", res.Model, "format", p.format, "audio_seconds", res.Duration,
+	log.Debug("openai: job done", "model", res.Model, "format", p.format, "audio_seconds", res.Duration,
 		"segments", len(res.Segments), "elapsed", time.Since(start).Round(time.Millisecond))
 }
 
@@ -152,7 +152,7 @@ func (s *Server) fail(w http.ResponseWriter, log *slog.Logger, err error, start 
 	if ae.Status >= 500 && ae.Status != 499 {
 		log.Error("openai: job failed", attrs...)
 	} else {
-		log.Info("openai: job failed", attrs...)
+		log.Debug("openai: job failed", attrs...)
 	}
 	WriteError(w, ae)
 }

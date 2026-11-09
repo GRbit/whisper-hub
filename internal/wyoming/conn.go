@@ -455,7 +455,7 @@ func (c *conn) transcribe(u *utterance) bool {
 	}
 
 	text := strings.TrimSpace(res.Text)
-	log.Info("wyoming transcription", "model", res.Model, "language", res.Language,
+	log.Debug("wyoming transcription", "model", res.Model, "language", res.Language,
 		"audio_seconds", round2(res.Duration), "elapsed", time.Since(start).Round(time.Millisecond),
 		"chars", len(text), "status", "ok")
 	log.Debug("wyoming transcript", "text", text)
@@ -498,16 +498,16 @@ func (c *conn) jobFailed(log *slog.Logger, u *utterance, start time.Time, model 
 	elapsed := time.Since(start).Round(time.Millisecond)
 	if c.ctx.Err() != nil {
 		if c.hard.Err() != nil {
-			log.Info("wyoming transcription", "model", model, "audio_seconds", round2(u.seconds),
+			log.Debug("wyoming transcription", "model", model, "audio_seconds", round2(u.seconds),
 				"elapsed", elapsed, "status", "canceled", "reason", "shutdown")
 			c.sendError(core.KindUnavailable.String(), msgShutdown)
 		} else {
-			log.Info("wyoming transcription", "model", model, "audio_seconds", round2(u.seconds),
+			log.Debug("wyoming transcription", "model", model, "audio_seconds", round2(u.seconds),
 				"elapsed", elapsed, "status", "canceled", "reason", "client gone")
 		}
 		return false
 	}
-	log.Info("wyoming transcription", "model", model, "audio_seconds", round2(u.seconds),
+	log.Debug("wyoming transcription", "model", model, "audio_seconds", round2(u.seconds),
 		"elapsed", elapsed, "status", kind.String())
 	log.Debug("wyoming transcription error", "err", err)
 	c.sendError(kind.String(), core.ClientMessage(err))

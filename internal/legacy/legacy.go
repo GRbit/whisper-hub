@@ -269,7 +269,7 @@ func (s *Server) audio(w http.ResponseWriter, r *http.Request, u *upload, encode
 	if encode {
 		if u.err != nil {
 			if core.KindOf(u.err) == core.KindBadAudio {
-				s.log.Info("legacy: upload did not decode", "path", r.URL.Path, "bytes", u.size, "err", u.err)
+				s.log.Debug("legacy: upload did not decode", "path", r.URL.Path, "bytes", u.size, "err", u.err)
 				// The decoder's message is upstream's detail text verbatim.
 				writeDetail(w, http.StatusBadRequest, core.ClientMessage(u.err))
 			} else if r.Context().Err() == nil {
@@ -320,7 +320,7 @@ func durationValue(pcm core.PCM) string {
 func (s *Server) writeServiceError(w http.ResponseWriter, r *http.Request, err error, duration, failed string) {
 	w.Header().Set(durationHeader, duration)
 	kind := core.KindOf(err)
-	s.log.Info("legacy: job failed", "path", r.URL.Path, "kind", kind.String(), "err", err)
+	s.log.Debug("legacy: job failed", "path", r.URL.Path, "kind", kind.String(), "err", err)
 	switch kind {
 	case core.KindCanceled:
 		if r.Context().Err() != nil {
@@ -445,7 +445,7 @@ func (s *Server) handleASR(w http.ResponseWriter, r *http.Request) {
 	if engine == "" {
 		engine = m.Engine
 	}
-	s.log.Info("legacy: asr done", "model", res.Model, "engine", engine, "seconds", duration, "output", output)
+	s.log.Debug("legacy: asr done", "model", res.Model, "engine", engine, "seconds", duration, "output", output)
 	h := w.Header()
 	h.Set("Asr-Engine", engine)
 	h.Set(durationHeader, duration)
@@ -515,7 +515,7 @@ func (s *Server) handleDetect(w http.ResponseWriter, r *http.Request) {
 		writeServerError(w)
 		return
 	}
-	s.log.Info("legacy: detect-language done", "model", det.Model, "language", det.Language, "seconds", duration)
+	s.log.Debug("legacy: detect-language done", "model", det.Model, "language", det.Language, "seconds", duration)
 	b := appendPyJSONString([]byte(`{"detected_language":`), name)
 	b = appendPyJSONString(append(b, `,"language_code":`...), det.Language)
 	b = append(append(b, `,"confidence":`...), confidence...)
