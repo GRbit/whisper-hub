@@ -2,6 +2,7 @@ package hub
 
 import (
 	"context"
+	"log/slog"
 	"math"
 	"slices"
 	"time"
@@ -220,11 +221,20 @@ func (h *Hub) finish(ctx context.Context, ev *core.UsageEvent, start time.Time, 
 	attrs := []any{"user", ev.User, "protocol", ev.Protocol, "endpoint", ev.Endpoint, "model", ev.Model,
 		"engine", ev.Engine, "audio_s", math.Round(ev.AudioSeconds*100) / 100,
 		"queued_ms", ev.Queued.Milliseconds(), "elapsed_ms", ev.Elapsed.Milliseconds(), "status", ev.Status}
-	if err != nil {
-		// Full error incl. cause goes to the log only, never to clients.
-		h.log.Info("job failed", append(attrs, "err", err.Error())...)
-	} else {
-		h.log.Info("job done", attrs...)
+	// The usage recorder writes the one Info line per job; repeating it here
+	// would double every job in the log. Without a recorder this is it.
+	level := slog.LevelDebug
+	if h.usage == nil {
+		level = slog.LevelInfo
+	}
+	switch kind := core.KindOf(err); {
+	case err == nil:
+		h.log.Log(ctx, level, "job done", attrs...)
+	case kind == core.KindInternal || kind == core.KindUnavailable:
+		// Operator-relevant, and the cause (never shown to clients) is only here.
+		h.log.Warn("job failed", append(attrs, "err", err.Error())...)
+	default:
+		h.log.Log(ctx, level, "job failed", append(attrs, "err", err.Error())...)
 	}
 	if h.usage != nil {
 		// Detached so a canceled request still gets its record.

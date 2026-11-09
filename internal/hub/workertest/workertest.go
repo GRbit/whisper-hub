@@ -79,14 +79,23 @@ func DefaultInfo() Info {
 // tb.Cleanup. Every received job is also sent to Started() when there is
 // room in its buffer (64), so tests can wait for arrival without sleeping.
 func New(tb testing.TB, info Info) *Worker {
+	w := NewUnstarted(info)
+	w.Start()
+	tb.Cleanup(w.Close)
+	return w
+}
+
+// NewUnstarted is New without starting the server or registering cleanup,
+// so a standalone fake (cmd/fakeworker) can set its own Listener before
+// calling Start.
+func NewUnstarted(info Info) *Worker {
 	w := &Worker{info: info, healthy: true, transcribe: Echo, started: make(chan *Job, 64)}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", w.handleHealth)
 	mux.HandleFunc("GET /v1/info", w.handleInfo)
 	mux.HandleFunc("POST /v1/transcribe", w.handleTranscribe)
 	mux.HandleFunc("POST /v1/detect-language", w.handleDetect)
-	w.Server = httptest.NewServer(mux)
-	tb.Cleanup(w.Close)
+	w.Server = httptest.NewUnstartedServer(mux)
 	return w
 }
 
