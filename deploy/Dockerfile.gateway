@@ -1,23 +1,31 @@
-# Gateway only: the static whisper-hub binary plus ffmpeg. Engine workers
-# run in their own containers (see worker/).
+# syntax=docker/dockerfile:1
+# Gateway only: the whisper-hub binary and ffmpeg. Engine workers run in
+# their own containers (worker/Dockerfile).
+#   docker build -f deploy/Dockerfile.gateway -t whisper-hub-gateway .
 #
-# The build context is bin/, holding a static binary built on the host:
-#   make image-gateway
-# (CGO_ENABLED=0 go build -o bin/whisper-hub ./cmd/whisper-hub, then
-#  docker build -f deploy/Dockerfile.gateway bin)
-# Building on the host keeps a Go toolchain image out of the build.
-FROM alpine:3.22
+# ffmpeg is the exact build upstream whisper-asr-webservice ships, so
+# uploads decode to the same PCM and transcripts match byte for byte.
+FROM onerahmet/ffmpeg:n7.1 AS ffmpeg
 
-RUN apk add --no-cache ffmpeg \
-    && addgroup -S -g 65532 whisper \
-    && adduser -S -D -H -u 65532 -G whisper whisper \
-    && mkdir -p /config /data \
-    && chown whisper:whisper /data
+FROM golang:1.25-alpine AS build
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN --mount=type=cache,target=/go/pkg/mod go mod download
+COPY cmd/ cmd/
+COPY internal/ internal/
+ARG VERSION=dev
+RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o /out/whisper-hub ./cmd/whisper-hub
 
-COPY whisper-hub /usr/local/bin/whisper-hub
-
+# glibc base: the upstream ffmpeg binary needs libc, libm and libgcc.
+FROM debian:bookworm-slim
+COPY --from=ffmpeg /usr/local/bin/ffmpeg /usr/local/bin/ffmpeg
+COPY --from=build /out/whisper-hub /usr/local/bin/whisper-hub
+RUN ln -s whisper-hub /usr/local/bin/whisper-asr-webservice \
+    && groupadd -r -g 65532 whisper && useradd -r -u 65532 -g whisper -d /data -M whisper \
+    && mkdir -p /config /data && chown whisper:whisper /data
 USER 65532:65532
 # 9000 HTTP (legacy, OpenAI, /healthz), 10300 Wyoming.
 EXPOSE 9000 10300
-ENTRYPOINT ["/usr/local/bin/whisper-hub"]
-CMD ["serve"]
+HEALTHCHECK --interval=30s --start-period=30s CMD ["whisper-hub", "healthcheck"]
+ENTRYPOINT ["whisper-hub"]

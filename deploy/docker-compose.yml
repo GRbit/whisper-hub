@@ -1,0 +1,29 @@
+# All-in-one: gateway + faster_whisper worker in one container, a drop-in
+# for the upstream whisper-asr-webservice service.
+#   docker compose -f deploy/docker-compose.yml up -d
+# Authentication: add deploy/docker-compose.auth.yml (see deploy/auth/).
+services:
+  whisper:
+    image: whisper-hub:faster_whisper
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      args:
+        ENGINE: faster_whisper
+    environment:
+      - ASR_MODEL=base
+      # Upstream variables keep working, e.g.:
+      # - ASR_QUANTIZATION=int8
+      # - LOG_LEVEL=DEBUG
+    ports:
+      - "9000:9000"   # legacy + OpenAI API, /healthz
+      - "10300:10300" # Wyoming (Home Assistant)
+    volumes:
+      # Same path as upstream, so an existing model cache volume is reused.
+      - cache-whisper:/root/.cache
+    # Longer than http.shutdown_grace (30s), so running jobs can finish.
+    stop_grace_period: 40s
+    restart: unless-stopped
+
+volumes:
+  cache-whisper:

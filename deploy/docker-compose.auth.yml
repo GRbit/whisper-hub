@@ -1,0 +1,20 @@
+# Authentication overlay for the all-in-one setup:
+#   cp deploy/auth/users.example.yaml deploy/auth/users.yaml   # then edit
+#   docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.auth.yml up -d
+# Create credentials with the binary inside the container:
+#   docker compose -f deploy/docker-compose.yml exec whisper whisper-hub hash
+#   docker compose -f deploy/docker-compose.yml exec whisper whisper-hub apikey
+# Edits to users.yaml apply within 5 seconds, no restart needed.
+services:
+  whisper:
+    environment:
+      - WHISPER_HUB_AUTH_USERS_FILE=/config/users.yaml
+      - WHISPER_HUB_AUTH_WYOMING_USER=homeassistant
+      - WHISPER_HUB_AUTH_USAGE_TOTALS_FILE=/data/usage.json
+      - WHISPER_HUB_AUTH_USAGE_LOG_FILE=/data/requests.jsonl
+    volumes:
+      - ./auth/users.yaml:/config/users.yaml:ro
+      - usage-data:/data
+
+volumes:
+  usage-data:

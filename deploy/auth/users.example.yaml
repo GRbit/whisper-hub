@@ -1,0 +1,16 @@
+# whisper-hub users file. Hashes only: no plaintext passwords or keys.
+#   whisper-hub hash     -> password_hash (asks for the password, no echo)
+#   whisper-hub apikey   -> a key to hand out once, and its sha256: hash for api_keys
+# Every user may use the default model; "models" grants more (exact ids or
+# "*" globs). "admin" may read GET /_hub/usage.
+users:
+  - name: alice
+    password_hash: "$2a$12$REPLACE.WITH.OUTPUT.OF.whisper-hub.hash........"
+    models: ["small", "large-*"]
+  - name: scripts
+    api_keys: ["sha256:REPLACE_WITH_OUTPUT_OF_whisper-hub_apikey"]
+  # Wyoming connections (Home Assistant) act as this user; no credentials.
+  - name: homeassistant
+  - name: admin
+    api_keys: ["sha256:REPLACE_WITH_OUTPUT_OF_whisper-hub_apikey"]
+    admin: true

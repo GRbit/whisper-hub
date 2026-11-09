@@ -5,12 +5,12 @@
 #     internal/wyoming/interop/client.py and zeroconf_check.py
 # The owners' scripts run unmodified; only their targets change (the
 # gateway containers take the host names the scripts expect).
-#   GATEWAY_IMAGE=whisper-hub-gateway:latest deploy/e2e/run.sh
+#   GATEWAY_IMAGE=whisper-hub-gateway:latest deploy/e2e/clients.sh
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 root="$(cd "$here/../.." && pwd)"
 image="${GATEWAY_IMAGE:-whisper-hub-gateway:latest}"
-sdk_image="${SDK_IMAGE:-whisper-hub-openai-sdk:latest}"
+sdk_image="${E2E_IMAGE:-whisper-hub-e2e:latest}"
 wyoming_version="${WYOMING_VERSION:-1.11.0}"
 net=whub-e2e
 names=(whub-fw-openai whub-fw-heard whub-gw-openai wyo-fake-plain wyo-fake-stream wyo-fake-fail wyo-fake-zc)
@@ -38,7 +38,7 @@ gateway() { # name worker-name env...
 }
 wait_healthy() { # name
 	for _ in $(seq 100); do
-		if docker exec "$1" wget -qO- http://127.0.0.1:9000/healthz >/dev/null 2>&1; then return 0; fi
+		if docker exec "$1" whisper-hub healthcheck >/dev/null 2>&1; then return 0; fi
 		sleep 0.2
 	done
 	echo "$1 never became healthy"; docker logs "$1" 2>&1 | tail -30; return 1
@@ -60,7 +60,7 @@ chmod 644 "$work/users.yaml"
 ffmpeg -v error -f lavfi -i "sine=frequency=440:duration=3.5" -ar 8000 "$work/a.wav"
 printf 'corrupt, not audio' >"$work/corrupt.wav"
 chmod 644 "$work"/*.wav
-cp "$root/internal/openaiapi/cmd/fakeserver/sdk_check.py" "$here/run_sdk_check.py" "$work/"
+cp "$root/internal/openaiapi/cmd/fakeserver/sdk_check.py" "$work/"
 
 fakeworker whub-fw-openai openai
 fakeworker whub-fw-heard heard
@@ -74,8 +74,8 @@ for n in whub-gw-openai wyo-fake-plain wyo-fake-stream wyo-fake-fail wyo-fake-zc
 
 status=0
 echo "== openai SDK"
-docker run --rm --network "$net" -v "$work:/work:ro" "$sdk_image" python3 -I /work/run_sdk_check.py \
-	/work/sdk_check.py http://whub-gw-openai:9000/v1 /work/a.wav || status=1
+docker run --rm --network "$net" -v "$work:/work:ro" "$sdk_image" /work/sdk_check.py \
+	--real-gateway http://whub-gw-openai:9000/v1 /work/a.wav || status=1
 
 echo "== wyoming $wyoming_version"
 interop="whisper-hub-wyoming-interop:$wyoming_version"

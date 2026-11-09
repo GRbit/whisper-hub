@@ -1,0 +1,63 @@
+# syntax=docker/dockerfile:1
+# CUDA all-in-one image: like deploy/Dockerfile, on the CUDA base of
+# worker/Dockerfile.gpu. Run with --gpus all.
+#   docker build -f deploy/Dockerfile.gpu -t whisper-hub:faster_whisper-gpu .
+# ENGINE: faster_whisper (default) | whisperx | openai_whisper
+#
+# UNTESTED: the build machine has no GPU. The CPU image is verified end to
+# end; this file differs only in base image and torch index.
+ARG ENGINE=faster_whisper
+
+FROM onerahmet/ffmpeg:n7.1 AS ffmpeg
+
+FROM golang:1.25-alpine AS gateway
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN --mount=type=cache,target=/go/pkg/mod go mod download
+COPY cmd/ cmd/
+COPY internal/ internal/
+ARG VERSION=dev
+RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o /out/whisper-hub ./cmd/whisper-hub
+
+FROM nvidia/cuda:12.9.2-cudnn-runtime-ubuntu24.04
+ARG ENGINE
+ARG TORCH_INDEX=https://download.pytorch.org/whl/cu126
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PATH=/opt/venv/bin:${PATH}
+RUN export DEBIAN_FRONTEND=noninteractive \
+    && apt-get -qq update \
+    && apt-get -qq install --no-install-recommends python3.12 python3.12-venv \
+    && rm -rf /var/lib/apt/lists/* \
+    && python3.12 -m venv /opt/venv
+WORKDIR /app
+COPY worker/requirements/ requirements/
+RUN --mount=type=cache,target=/root/.cache/pip \
+    case "${ENGINE}" in \
+      whisperx|openai_whisper) extra="--extra-index-url ${TORCH_INDEX}" ;; \
+      faster_whisper) extra="" ;; \
+      *) echo "unsupported ENGINE=${ENGINE} for the GPU image" >&2; exit 1 ;; \
+    esac \
+    && pip install ${extra} -c requirements/constraints.txt -r "requirements/${ENGINE}.txt" \
+    && if [ -f "requirements/${ENGINE}-nodeps.txt" ]; then pip install --no-deps -r "requirements/${ENGINE}-nodeps.txt"; fi
+COPY worker/whisper_worker/ whisper_worker/
+
+COPY --from=ffmpeg /usr/local/bin/ffmpeg /usr/local/bin/ffmpeg
+COPY --from=gateway /out/whisper-hub /usr/local/bin/whisper-hub
+RUN ln -s whisper-hub /usr/local/bin/whisper-asr-webservice
+
+# See deploy/Dockerfile for why ASR_ENGINE is not set and the worker port.
+ENV WHISPER_HUB_WORKER_COMMAND="[python, -m, whisper_worker]" \
+    WHISPER_HUB_WORKER_ENGINE=${ENGINE} \
+    WHISPER_HUB_WORKER_IMAGE_TAG="whisper-hub:%s-gpu" \
+    WHISPER_HUB_HUB_WORKERS="[{url: \"http://127.0.0.1:19100\"}]" \
+    WHISPER_HUB_HUB_RETRY_MAX=2s \
+    WORKER_HOST=127.0.0.1 \
+    WORKER_PORT=19100 \
+    WORKER_PRELOAD=true
+
+EXPOSE 9000 10300
+HEALTHCHECK --interval=30s --start-period=10m CMD ["whisper-hub", "healthcheck"]
+ENTRYPOINT ["whisper-hub"]

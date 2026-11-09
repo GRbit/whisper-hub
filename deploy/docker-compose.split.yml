@@ -1,0 +1,50 @@
+# Split setup: the gateway and each engine worker in their own containers.
+#   docker compose -f deploy/docker-compose.split.yml up -d
+services:
+  gateway:
+    image: whisper-hub-gateway:latest
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.gateway
+    environment:
+      WHISPER_HUB_HUB_WORKERS: '[{url: "http://worker-faster-whisper:9100"}]'
+      # With the second worker below:
+      # WHISPER_HUB_HUB_WORKERS: '[{url: "http://worker-faster-whisper:9100"}, {url: "http://worker-whisperx:9100"}]'
+    ports:
+      - "9000:9000"
+      - "10300:10300"
+    stop_grace_period: 40s
+    restart: unless-stopped
+
+  worker-faster-whisper:
+    image: whisper-hub-worker:faster_whisper
+    build:
+      context: ../worker
+      args:
+        ENGINE: faster_whisper
+    environment:
+      - ASR_MODEL=base
+      # Several models from one worker; the first is the default:
+      # - WORKER_MODELS=base,small
+      - WORKER_PRELOAD=true
+    volumes:
+      - cache-whisper:/root/.cache
+    restart: unless-stopped
+
+  # A second worker with another engine. Its models appear next to the
+  # first one's; clients pick them by name (model=large-v3, Wyoming model).
+  # worker-whisperx:
+  #   image: whisper-hub-worker:whisperx
+  #   build:
+  #     context: ../worker
+  #     args:
+  #       ENGINE: whisperx
+  #   environment:
+  #     - ASR_MODEL=large-v3
+  #     - HF_TOKEN=${HF_TOKEN}   # enables diarization
+  #   volumes:
+  #     - cache-whisper:/root/.cache
+  #   restart: unless-stopped
+
+volumes:
+  cache-whisper:
