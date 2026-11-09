@@ -33,6 +33,7 @@ import (
 	"github.com/GRbit/whisper-hub/internal/hub"
 	"github.com/GRbit/whisper-hub/internal/legacy"
 	"github.com/GRbit/whisper-hub/internal/openaiapi"
+	"github.com/GRbit/whisper-hub/internal/workerproc"
 	"github.com/GRbit/whisper-hub/internal/wyoming"
 )
 
@@ -48,6 +49,9 @@ type Config struct {
 	Legacy  legacy.Config    `yaml:"legacy"`
 	OpenAI  openaiapi.Config `yaml:"openai"`
 	Wyoming Wyoming          `yaml:"wyoming"`
+	// Worker is the engine worker the gateway starts itself (all-in-one
+	// image). Default: none.
+	Worker workerproc.Config `yaml:"worker"`
 
 	// File is the configuration file that was read, "" for none.
 	File string `yaml:"-"`

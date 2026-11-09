@@ -773,3 +773,55 @@ func TestLegacyAuthBasicAndByteIdentical401(t *testing.T) {
 		t.Fatalf("/docs: %v %v", resp, err)
 	}
 }
+
+// All-in-one supervision: the gateway exits when its worker dies (so the
+// container restarts), and stops the worker when it shuts down itself.
+func TestManagedWorker(t *testing.T) {
+	w := workertest.New(t, workertest.DefaultInfo())
+	r := startGateway(t, w, map[string]string{"WHISPER_HUB_WORKER_COMMAND": `[sh, -c, "sleep 0.5; exit 7"]`})
+	select {
+	case err := <-r.done:
+		r.done <- err
+		if err == nil || !strings.Contains(err.Error(), "engine worker exited") {
+			t.Fatalf("Run: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("gateway kept running without its worker")
+	}
+
+	pidFile := filepath.Join(t.TempDir(), "pid")
+	r = startGateway(t, w, map[string]string{"WHISPER_HUB_WORKER_COMMAND": fmt.Sprintf(`[sh, -c, "echo $$ > %s; exec sleep 30"]`, pidFile)})
+	var pid int
+	deadline := time.Now().Add(5 * time.Second)
+	for pid == 0 && time.Now().Before(deadline) {
+		b, _ := os.ReadFile(pidFile)
+		fmt.Sscan(string(b), &pid)
+		time.Sleep(10 * time.Millisecond)
+	}
+	r.cancel()
+	select {
+	case err := <-r.done:
+		r.done <- err
+	case <-time.After(10 * time.Second):
+		t.Fatal("shutdown hung on the worker")
+	}
+	if pid == 0 || exec.Command("kill", "-0", fmt.Sprint(pid)).Run() == nil {
+		t.Fatalf("worker %d still alive after shutdown", pid)
+	}
+
+	cfgErr := map[string]string{"WHISPER_HUB_WORKER_COMMAND": "[true]", "WHISPER_HUB_WORKER_ENGINE": "faster_whisper"}
+	t.Setenv("ASR_ENGINE", "openai_whisper")
+	env := map[string]string{"WHISPER_HUB_HTTP_LISTEN": "127.0.0.1:0", "WHISPER_HUB_WYOMING_ENABLED": "false",
+		"WHISPER_HUB_HUB_WORKERS": fmt.Sprintf("[{url: %q}]", w.URL)}
+	for k, v := range cfgErr {
+		env[k] = v
+	}
+	cfg, err := config.Load(nil, func(k string) (string, bool) { v, ok := env[k]; return v, ok }, io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = newGateway(context.Background(), cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err == nil || !strings.Contains(err.Error(), "whisper-hub:openai_whisper") {
+		t.Fatalf("engine mismatch: %v", err)
+	}
+}

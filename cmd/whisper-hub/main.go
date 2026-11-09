@@ -6,6 +6,7 @@
 //	whisper-hub hash      print a bcrypt hash for a users file password
 //	whisper-hub apikey    print a new API key and its users file hash
 //	whisper-hub config    print the effective configuration
+//	whisper-hub healthcheck  exit 0 when /healthz of the local gateway is ok
 //	whisper-hub version
 package main
 
@@ -16,9 +17,12 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/GRbit/whisper-hub/internal/config"
 )
@@ -37,8 +41,12 @@ func run(args []string, stdin *os.File, stdout, stderr io.Writer) int {
 	}
 	var err error
 	switch cmd {
-	case "serve":
+	// whisper-asr-webservice: the upstream image's command, for deployments
+	// that spell it out.
+	case "serve", "whisper-asr-webservice":
 		err = serve(args, stderr)
+	case "healthcheck":
+		err = healthcheck(args, stderr)
 	case "config":
 		var cfg config.Config
 		if cfg, err = config.Load(args, os.LookupEnv, stderr); err == nil {
@@ -54,7 +62,7 @@ func run(args []string, stdin *os.File, stdout, stderr io.Writer) int {
 	case "version":
 		_, err = fmt.Fprintln(stdout, version)
 	default:
-		err = fmt.Errorf("unknown command %q (serve, hash, apikey, config, version)", cmd)
+		err = fmt.Errorf("unknown command %q (serve, hash, apikey, config, healthcheck, version)", cmd)
 	}
 	if errors.Is(err, flag.ErrHelp) {
 		return 0
@@ -103,4 +111,28 @@ func newLogger(c config.Log, w io.Writer) *slog.Logger {
 		return slog.New(slog.NewJSONHandler(w, opts))
 	}
 	return slog.New(slog.NewTextHandler(w, opts))
+}
+
+// healthcheck asks the gateway configured like this process (same flags
+// and environment) for /healthz, for container HEALTHCHECKs in images
+// without curl or wget.
+func healthcheck(args []string, stderr io.Writer) error {
+	cfg, err := config.Load(args, os.LookupEnv, stderr)
+	if err != nil {
+		return err
+	}
+	_, port, err := net.SplitHostPort(cfg.HTTP.Listen)
+	if err != nil {
+		return err
+	}
+	c := &http.Client{Timeout: 5 * time.Second}
+	resp, err := c.Get("http://" + net.JoinHostPort("127.0.0.1", port) + "/healthz")
+	if err != nil {
+		return err
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("healthz: %s", resp.Status)
+	}
+	return nil
 }

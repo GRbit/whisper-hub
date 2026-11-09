@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"os"
 	"sync"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 	"github.com/GRbit/whisper-hub/internal/hub"
 	"github.com/GRbit/whisper-hub/internal/legacy"
 	"github.com/GRbit/whisper-hub/internal/openaiapi"
+	"github.com/GRbit/whisper-hub/internal/workerproc"
 	"github.com/GRbit/whisper-hub/internal/wyoming"
 )
 
@@ -30,6 +32,7 @@ type gateway struct {
 	httpLns []net.Listener
 	wy      *wyoming.Server
 	wyLn    net.Listener
+	worker  *workerproc.Proc
 }
 
 // newGateway builds every component and binds the listeners, so a port
@@ -42,6 +45,11 @@ func newGateway(ctx context.Context, cfg config.Config, log *slog.Logger) (_ *ga
 		}
 	}()
 
+	// Before anything logs "started": a wrong ASR_ENGINE is a deployment
+	// error the operator must see first.
+	if _, err := cfg.Worker.Env(os.Environ()); err != nil {
+		return nil, err
+	}
 	dec := audio.New(cfg.Audio, log)
 	if err := dec.Check(ctx); err != nil {
 		return nil, fmt.Errorf("%w (install ffmpeg or set audio.ffmpeg_path)", err)
@@ -87,6 +95,11 @@ func newGateway(ctx context.Context, cfg config.Config, log *slog.Logger) (_ *ga
 		if g.wyLn, err = net.Listen("tcp", wc.Listen); err != nil {
 			return nil, fmt.Errorf("wyoming listen: %w", err)
 		}
+	}
+
+	// Last, so a bad port or config does not leave a worker loading a model.
+	if g.worker, err = workerproc.Start(cfg.Worker, os.Environ(), log); err != nil {
+		return nil, err
 	}
 
 	workers := make([]string, 0, len(cfg.Hub.Workers))
@@ -154,6 +167,11 @@ func (g *gateway) Run(ctx context.Context) error {
 		go func() { wyDone <- g.wy.Serve(wyCtx, g.wyLn) }()
 	}
 
+	var workerDone <-chan struct{} // nil (never ready) without a managed worker
+	if g.worker != nil {
+		workerDone = g.worker.Done()
+	}
+
 	var runErr error
 	wyStopped := false
 	select {
@@ -164,6 +182,10 @@ func (g *gateway) Run(ctx context.Context) error {
 		if runErr == nil {
 			runErr = errors.New("wyoming server stopped")
 		}
+	case <-workerDone:
+		// Exit so the container restarts, rather than answer "unavailable"
+		// forever.
+		runErr = fmt.Errorf("engine worker exited: %v", g.worker.Err())
 	}
 	grace := g.cfg.HTTP.ShutdownGrace
 	g.log.Info("shutting down", "grace", grace, "err", runErr)
@@ -190,6 +212,10 @@ func (g *gateway) Run(ctx context.Context) error {
 			runErr = err
 		}
 	}
+	// The worker goes last: requests still draining above need it.
+	if g.worker != nil {
+		g.worker.Stop()
+	}
 	stopAuth()
 	<-authDone
 	g.closeAll()
@@ -198,6 +224,9 @@ func (g *gateway) Run(ctx context.Context) error {
 }
 
 func (g *gateway) closeAll() {
+	if g.worker != nil {
+		g.worker.Stop()
+	}
 	for _, ln := range g.httpLns {
 		_ = ln.Close()
 	}

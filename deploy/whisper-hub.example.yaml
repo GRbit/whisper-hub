@@ -130,3 +130,13 @@ wyoming:
     enabled: false
     name: whisper-hub
     host: "" # default: the address of the interface routing to mDNS
+
+worker:
+  # The engine worker the gateway starts and owns, as in the all-in-one
+  # image (which sets these). Empty command: workers run elsewhere.
+  command: [] # e.g. [python, -m, whisper_worker]
+  # Engine installed next to command. ASR_ENGINE unset -> this engine; a
+  # different ASR_ENGINE fails at startup and names the image to use.
+  engine: ""
+  image_tag: "whisper-hub:%s"
+  stop_timeout: 10s # SIGTERM -> SIGKILL
