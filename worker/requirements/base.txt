@@ -1,0 +1,5 @@
+# HTTP layer shared by every engine image.
+uvicorn==0.52.1
+h11==0.16.0
+click==8.4.2
+python-multipart==0.0.32

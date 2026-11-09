@@ -1,0 +1,10 @@
+# ctranslate2 only: faster-whisper does not need torch.
+-r base.txt
+faster-whisper==1.2.1
+ctranslate2==4.8.1
+numpy==2.4.6
+huggingface_hub==1.27.0
+tokenizers==0.22.2
+onnxruntime==1.28.0
+av==15.1.0
+tqdm==4.70.0

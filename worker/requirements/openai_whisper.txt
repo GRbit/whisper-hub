@@ -1,0 +1,6 @@
+-r base.txt
+openai-whisper==20250625
+torch==2.7.1
+numpy==2.4.6
+huggingface_hub==1.27.0
+tqdm==4.70.0

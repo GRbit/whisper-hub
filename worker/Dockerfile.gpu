@@ -1,0 +1,38 @@
+# syntax=docker/dockerfile:1
+# CUDA image of the whisper-hub engine worker (same base as upstream Dockerfile.gpu):
+#   docker build -f Dockerfile.gpu --build-arg ENGINE=faster_whisper -t whisper-hub-worker:faster_whisper-gpu worker
+# ENGINE: faster_whisper (default) | whisperx | openai_whisper. Run with --gpus all.
+
+FROM nvidia/cuda:12.9.2-cudnn-runtime-ubuntu24.04 AS runtime
+
+ARG ENGINE=faster_whisper
+ARG TORCH_INDEX=https://download.pytorch.org/whl/cu126
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PATH=/opt/venv/bin:${PATH}
+
+RUN export DEBIAN_FRONTEND=noninteractive \
+    && apt-get -qq update \
+    && apt-get -qq install --no-install-recommends python3.12 python3.12-venv \
+    && rm -rf /var/lib/apt/lists/* \
+    && python3.12 -m venv /opt/venv
+
+WORKDIR /app
+
+COPY requirements/ requirements/
+RUN --mount=type=cache,target=/root/.cache/pip \
+    case "${ENGINE}" in \
+      whisperx|openai_whisper) extra="--extra-index-url ${TORCH_INDEX}" ;; \
+      faster_whisper) extra="" ;; \
+      *) echo "unsupported ENGINE=${ENGINE} for the GPU image" >&2; exit 1 ;; \
+    esac \
+    && pip install ${extra} -c requirements/constraints.txt -r "requirements/${ENGINE}.txt" \
+    && if [ -f "requirements/${ENGINE}-nodeps.txt" ]; then pip install --no-deps -r "requirements/${ENGINE}-nodeps.txt"; fi
+
+COPY whisper_worker/ whisper_worker/
+
+ENV ASR_ENGINE=${ENGINE}
+EXPOSE 9100
+ENTRYPOINT ["python", "-m", "whisper_worker"]
