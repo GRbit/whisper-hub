@@ -1,0 +1,28 @@
+{
+  "request": {
+    "method": "POST",
+    "target": "/detect-language",
+    "body_sha256": "dd593078387e0742f99e730ea8073096e824cffa463ed85957e833c4237bb3a7"
+  },
+  "status": 400,
+  "headers": [
+    [
+      "content-length",
+      "67"
+    ],
+    [
+      "content-type",
+      "application/json"
+    ],
+    [
+      "date",
+      "Mon, 09 Nov 2026 22:56:34 GMT"
+    ],
+    [
+      "server",
+      "uvicorn"
+    ]
+  ],
+  "body": "{\"detail\":\"Failed to decode audio (7 bytes, magic=67617262616765)\"}",
+  "body_len": 67
+}

@@ -1,0 +1,40 @@
+{
+  "request": {
+    "method": "POST",
+    "target": "/asr?output=json\u0026word_timestamps=true\u0026vad_filter=true",
+    "body_sha256": "e0c79e16532b280f73b836b8b459572f443cd72b9ebd86cad47eb5dd4562c0ad"
+  },
+  "status": 200,
+  "headers": [
+    [
+      "asr-engine",
+      "faster_whisper"
+    ],
+    [
+      "content-disposition",
+      "attachment; filename=\"english-front-center.wav.json\""
+    ],
+    [
+      "content-type",
+      "text/plain; charset=utf-8"
+    ],
+    [
+      "date",
+      "Mon, 09 Nov 2026 22:56:22 GMT"
+    ],
+    [
+      "server",
+      "uvicorn"
+    ],
+    [
+      "transfer-encoding",
+      "chunked"
+    ],
+    [
+      "x-audio-duration-seconds",
+      "1.428"
+    ]
+  ],
+  "body": "{\"language\": \"en\", \"segments\": [{\"id\": 1, \"seek\": 0, \"start\": 0.0, \"end\": 1.3, \"text\": \" Front Center.\", \"tokens\": [50364, 17348, 5169, 13, 50436], \"avg_logprob\": -0.8303088943163554, \"compression_ratio\": 0.6190476190476191, \"no_speech_prob\": 0.062248751521110535, \"words\": [{\"start\": 0.0, \"end\": 0.46, \"word\": \" Front\", \"probability\": 0.5687055587768555}, {\"start\": 0.46, \"end\": 1.3, \"word\": \" Center.\", \"probability\": 0.5092388391494751}], \"temperature\": 0.0}], \"text\": \" Front Center.\"}",
+  "body_len": 489
+}

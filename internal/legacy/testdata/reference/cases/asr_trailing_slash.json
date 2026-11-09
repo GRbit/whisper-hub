@@ -1,0 +1,27 @@
+{
+  "request": {
+    "method": "POST",
+    "target": "/asr/?output=json"
+  },
+  "status": 307,
+  "headers": [
+    [
+      "content-length",
+      "0"
+    ],
+    [
+      "date",
+      "Mon, 09 Nov 2026 22:56:34 GMT"
+    ],
+    [
+      "location",
+      "http://asr.test:9000/asr?output=json"
+    ],
+    [
+      "server",
+      "uvicorn"
+    ]
+  ],
+  "body": "",
+  "body_len": 0
+}

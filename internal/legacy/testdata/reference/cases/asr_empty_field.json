@@ -1,0 +1,28 @@
+{
+  "request": {
+    "method": "POST",
+    "target": "/asr",
+    "body_sha256": "4f301b639504ef031997038a9eb0332b60c2a4c86e76d5d00802ff86b8ab572c"
+  },
+  "status": 422,
+  "headers": [
+    [
+      "content-length",
+      "95"
+    ],
+    [
+      "content-type",
+      "application/json"
+    ],
+    [
+      "date",
+      "Mon, 09 Nov 2026 22:56:30 GMT"
+    ],
+    [
+      "server",
+      "uvicorn"
+    ]
+  ],
+  "body": "{\"detail\":[{\"type\":\"missing\",\"loc\":[\"body\",\"audio_file\"],\"msg\":\"Field required\",\"input\":null}]}",
+  "body_len": 95
+}

@@ -1,0 +1,23 @@
+{
+  "request": {
+    "method": "GET",
+    "target": "/assets/swagger-ui.css"
+  },
+  "status": 304,
+  "headers": [
+    [
+      "date",
+      "Mon, 09 Nov 2026 22:56:34 GMT"
+    ],
+    [
+      "etag",
+      "\"1f75e3c45431eb214a976d3c64d2c497\""
+    ],
+    [
+      "server",
+      "uvicorn"
+    ]
+  ],
+  "body": "",
+  "body_len": 0
+}

@@ -1,0 +1,28 @@
+{
+  "request": {
+    "method": "POST",
+    "target": "/asr",
+    "body_sha256": "13c32b446a715c3fcaa77a17adb52c3d4b8ec5c100a07359a28cafb8e55e9c90"
+  },
+  "status": 400,
+  "headers": [
+    [
+      "content-length",
+      "76"
+    ],
+    [
+      "content-type",
+      "application/json"
+    ],
+    [
+      "date",
+      "Mon, 09 Nov 2026 22:56:30 GMT"
+    ],
+    [
+      "server",
+      "uvicorn"
+    ]
+  ],
+  "body": "{\"detail\":\"The Content-Disposition header field \\\"name\\\" must be provided.\"}",
+  "body_len": 76
+}

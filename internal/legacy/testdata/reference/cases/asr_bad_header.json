@@ -1,0 +1,28 @@
+{
+  "request": {
+    "method": "POST",
+    "target": "/asr",
+    "body_sha256": "3797ec14dfeae9368d4c9978be2b395171400b5225d28f0eb8e03e98c8d34e1f"
+  },
+  "status": 400,
+  "headers": [
+    [
+      "content-length",
+      "48"
+    ],
+    [
+      "content-type",
+      "application/json"
+    ],
+    [
+      "date",
+      "Mon, 09 Nov 2026 22:56:30 GMT"
+    ],
+    [
+      "server",
+      "uvicorn"
+    ]
+  ],
+  "body": "{\"detail\":\"There was an error parsing the body\"}",
+  "body_len": 48
+}

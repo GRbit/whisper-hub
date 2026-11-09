@@ -1,0 +1,27 @@
+{
+  "request": {
+    "method": "GET",
+    "target": "/redoc"
+  },
+  "status": 200,
+  "headers": [
+    [
+      "content-length",
+      "903"
+    ],
+    [
+      "content-type",
+      "text/html; charset=utf-8"
+    ],
+    [
+      "date",
+      "Mon, 09 Nov 2026 22:56:34 GMT"
+    ],
+    [
+      "server",
+      "uvicorn"
+    ]
+  ],
+  "body": "\n    \u003c!DOCTYPE html\u003e\n    \u003chtml\u003e\n    \u003chead\u003e\n    \u003ctitle\u003eWhisper Asr Webservice - ReDoc\u003c/title\u003e\n    \u003c!-- needed for adaptive design --\u003e\n    \u003cmeta charset=\"utf-8\"/\u003e\n    \u003cmeta name=\"viewport\" content=\"width=device-width, initial-scale=1\"\u003e\n    \n    \u003clink href=\"https://fonts.googleapis.com/css?family=Montserrat:300,400,700|Roboto:300,400,700\" rel=\"stylesheet\"\u003e\n    \n    \u003clink rel=\"shortcut icon\" href=\"https://fastapi.tiangolo.com/img/favicon.png\"\u003e\n    \u003c!--\n    ReDoc doesn't change outer page styles\n    --\u003e\n    \u003cstyle\u003e\n      body {\n        margin: 0;\n        padding: 0;\n      }\n    \u003c/style\u003e\n    \u003c/head\u003e\n    \u003cbody\u003e\n    \u003cnoscript\u003e\n        ReDoc requires Javascript to function. Please enable it to browse the documentation.\n    \u003c/noscript\u003e\n    \u003credoc spec-url=\"/openapi.json\"\u003e\u003c/redoc\u003e\n    \u003cscript src=\"https://cdn.jsdelivr.net/npm/redoc@2/bundles/redoc.standalone.js\"\u003e \u003c/script\u003e\n    \u003c/body\u003e\n    \u003c/html\u003e\n    ",
+  "body_len": 903
+}

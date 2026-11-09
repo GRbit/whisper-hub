@@ -1,0 +1,28 @@
+{
+  "request": {
+    "method": "POST",
+    "target": "/asr?encode=false",
+    "body_sha256": "2b0a6eea5bb0d49cff31a41df5741e127208ffcc7b739bedd1c10778f30c9dff"
+  },
+  "status": 400,
+  "headers": [
+    [
+      "content-length",
+      "80"
+    ],
+    [
+      "content-type",
+      "application/json"
+    ],
+    [
+      "date",
+      "Mon, 09 Nov 2026 22:56:34 GMT"
+    ],
+    [
+      "server",
+      "uvicorn"
+    ]
+  ],
+  "body": "{\"detail\":\"Raw PCM payload has an odd length (3 bytes) (3 bytes, magic=010203)\"}",
+  "body_len": 80
+}

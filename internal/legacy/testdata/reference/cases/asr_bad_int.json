@@ -1,0 +1,28 @@
+{
+  "request": {
+    "method": "POST",
+    "target": "/asr?min_speakers=x\u0026max_speakers=1.5",
+    "body_sha256": "e0c79e16532b280f73b836b8b459572f443cd72b9ebd86cad47eb5dd4562c0ad"
+  },
+  "status": 422,
+  "headers": [
+    [
+      "content-length",
+      "302"
+    ],
+    [
+      "content-type",
+      "application/json"
+    ],
+    [
+      "date",
+      "Mon, 09 Nov 2026 22:56:30 GMT"
+    ],
+    [
+      "server",
+      "uvicorn"
+    ]
+  ],
+  "body": "{\"detail\":[{\"type\":\"int_parsing\",\"loc\":[\"query\",\"min_speakers\"],\"msg\":\"Input should be a valid integer, unable to parse string as an integer\",\"input\":\"x\"},{\"type\":\"int_parsing\",\"loc\":[\"query\",\"max_speakers\"],\"msg\":\"Input should be a valid integer, unable to parse string as an integer\",\"input\":\"1.5\"}]}",
+  "body_len": 302
+}

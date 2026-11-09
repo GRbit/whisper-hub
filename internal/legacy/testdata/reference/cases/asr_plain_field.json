@@ -1,0 +1,28 @@
+{
+  "request": {
+    "method": "POST",
+    "target": "/asr",
+    "body_sha256": "dc34c19a013e5bdf5eb89d6dfb8183bf37603595f9605f2a88ebdd619bfcb3f5"
+  },
+  "status": 422,
+  "headers": [
+    [
+      "content-length",
+      "172"
+    ],
+    [
+      "content-type",
+      "application/json"
+    ],
+    [
+      "date",
+      "Mon, 09 Nov 2026 22:56:30 GMT"
+    ],
+    [
+      "server",
+      "uvicorn"
+    ]
+  ],
+  "body": "{\"detail\":[{\"type\":\"value_error\",\"loc\":[\"body\",\"audio_file\"],\"msg\":\"Value error, Expected UploadFile, received: \u003cclass 'str'\u003e\",\"input\":\"hello \\\"x\\\"\\n\",\"ctx\":{\"error\":{}}}]}",
+  "body_len": 172
+}
