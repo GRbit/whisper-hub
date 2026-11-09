@@ -77,6 +77,13 @@ func (s *Server) handleStatic(w http.ResponseWriter, r *http.Request) {
 		body, ctype = mustStatic(p.file), p.ctype
 	} else {
 		m := s.model(r.Context(), "")
+		if m.ID == "" {
+			// No worker reported a model yet (still loading): the engine,
+			// and so the schema, is unknown. Upstream is not listening at
+			// all in this window; a wrong schema would mislead clients.
+			writeDetail(w, http.StatusServiceUnavailable, "No engine worker is available yet, try again later.")
+			return
+		}
 		file := openAPIFile(m)
 		s.log.Debug("legacy: serving openapi", "engine", m.Engine, "file", file)
 		body = mustStatic(file)

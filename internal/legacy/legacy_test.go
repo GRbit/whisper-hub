@@ -322,3 +322,23 @@ func (e *engineless) Transcribe(ctx context.Context, req *core.Request, f func(c
 	}
 	return res, err
 }
+
+// While no worker has reported a model the engine is unknown, so the
+// schema is too: 503 in upstream's error shape, and the right schema as
+// soon as a model appears (nothing is cached).
+func TestOpenAPIWhileNoWorkerIsUp(t *testing.T) {
+	svc := &fakeService{}
+	mux := http.NewServeMux()
+	New(Config{}, svc, fakeDecoder{}).Register(mux)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/openapi.json", nil))
+	if rec.Code != http.StatusServiceUnavailable || !strings.HasPrefix(rec.Body.String(), `{"detail":`) {
+		t.Fatalf("no models: %d %s", rec.Code, rec.Body)
+	}
+	svc.models = []core.Model{{ID: "tiny", Engine: "faster_whisper", Default: true}}
+	rec = httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/openapi.json", nil))
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "vad_filter") {
+		t.Fatalf("with a faster_whisper model: %d", rec.Code)
+	}
+}
