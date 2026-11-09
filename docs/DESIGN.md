@@ -200,8 +200,10 @@ Only the first 30 seconds are used, as upstream does.
 
 ## Conventions (apply to all code in this repository)
 
-- Never run `git commit` or `git push`. Never use `git -C`; `cd` instead.
-  Leave your work uncommitted in your worktree.
+- Commit only on your own worktree branch and only your own paths. The
+  whole commit message is at most 196 characters: `type: short imperative
+  subject`, a blank line, one short sentence on why. Never run `git push`.
+  Never use `git -C`; `cd` instead.
 - ASCII only in code and comments: `->` not an arrow glyph. Never use the
   em-dash character anywhere, including docs and reports; use " - ", a colon
   or a comma.
