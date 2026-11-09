@@ -1,0 +1,28 @@
+{
+  "request": {
+    "method": "POST",
+    "target": "/asr?output=%E2%82%AC",
+    "body_sha256": "e0c79e16532b280f73b836b8b459572f443cd72b9ebd86cad47eb5dd4562c0ad"
+  },
+  "status": 500,
+  "headers": [
+    [
+      "content-length",
+      "21"
+    ],
+    [
+      "content-type",
+      "text/plain; charset=utf-8"
+    ],
+    [
+      "date",
+      "Mon, 09 Nov 2026 22:56:25 GMT"
+    ],
+    [
+      "server",
+      "uvicorn"
+    ]
+  ],
+  "body": "Internal Server Error",
+  "body_len": 21
+}

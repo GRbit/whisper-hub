@@ -1,0 +1,31 @@
+{
+  "request": {
+    "method": "HEAD",
+    "target": "/asr"
+  },
+  "status": 405,
+  "headers": [
+    [
+      "allow",
+      "POST"
+    ],
+    [
+      "content-length",
+      "31"
+    ],
+    [
+      "content-type",
+      "application/json"
+    ],
+    [
+      "date",
+      "Mon, 09 Nov 2026 22:56:34 GMT"
+    ],
+    [
+      "server",
+      "uvicorn"
+    ]
+  ],
+  "body": "",
+  "body_len": 0
+}

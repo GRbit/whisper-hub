@@ -1,0 +1,43 @@
+{
+  "request": {
+    "method": "GET",
+    "target": "/assets/swagger-ui-bundle.js"
+  },
+  "status": 206,
+  "headers": [
+    [
+      "accept-ranges",
+      "bytes"
+    ],
+    [
+      "content-length",
+      "11"
+    ],
+    [
+      "content-range",
+      "bytes 0-10/1388421"
+    ],
+    [
+      "content-type",
+      "text/javascript; charset=utf-8"
+    ],
+    [
+      "date",
+      "Mon, 09 Nov 2026 22:56:34 GMT"
+    ],
+    [
+      "etag",
+      "\"bf9a037f741f03e7056f9e16f372a919\""
+    ],
+    [
+      "last-modified",
+      "Wed, 25 Oct 2023 08:21:23 GMT"
+    ],
+    [
+      "server",
+      "uvicorn"
+    ]
+  ],
+  "body": "/*! For lic",
+  "body_len": 11
+}

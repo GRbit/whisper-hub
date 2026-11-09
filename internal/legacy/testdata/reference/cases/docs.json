@@ -1,0 +1,27 @@
+{
+  "request": {
+    "method": "GET",
+    "target": "/docs"
+  },
+  "status": 200,
+  "headers": [
+    [
+      "content-length",
+      "931"
+    ],
+    [
+      "content-type",
+      "text/html; charset=utf-8"
+    ],
+    [
+      "date",
+      "Mon, 09 Nov 2026 22:56:34 GMT"
+    ],
+    [
+      "server",
+      "uvicorn"
+    ]
+  ],
+  "body": "\n    \u003c!DOCTYPE html\u003e\n    \u003chtml\u003e\n    \u003chead\u003e\n    \u003cmeta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\"\u003e\n    \u003clink type=\"text/css\" rel=\"stylesheet\" href=\"/assets/swagger-ui.css\"\u003e\n    \u003clink rel=\"shortcut icon\" href=\"\"\u003e\n    \u003ctitle\u003eWhisper Asr Webservice - Swagger UI\u003c/title\u003e\n    \u003c/head\u003e\n    \u003cbody\u003e\n    \u003cdiv id=\"swagger-ui\"\u003e\n    \u003c/div\u003e\n    \u003cscript src=\"/assets/swagger-ui-bundle.js\"\u003e\u003c/script\u003e\n    \u003c!-- `SwaggerUIBundle` is now available on the page --\u003e\n    \u003cscript\u003e\n    const ui = SwaggerUIBundle({\n        url: '/openapi.json',\n    \"dom_id\": \"#swagger-ui\",\n\"layout\": \"BaseLayout\",\n\"deepLinking\": true,\n\"showExtensions\": true,\n\"showCommonExtensions\": true,\n\"defaultModelsExpandDepth\": -1,\noauth2RedirectUrl: window.location.origin + '/docs/oauth2-redirect',\n    presets: [\n        SwaggerUIBundle.presets.apis,\n        SwaggerUIBundle.SwaggerUIStandalonePreset\n        ],\n    })\n    \u003c/script\u003e\n    \u003c/body\u003e\n    \u003c/html\u003e\n    ",
+  "body_len": 931
+}

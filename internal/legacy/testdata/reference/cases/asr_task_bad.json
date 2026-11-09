@@ -1,0 +1,32 @@
+{
+  "request": {
+    "method": "POST",
+    "target": "/asr?task=foo",
+    "body_sha256": "e0c79e16532b280f73b836b8b459572f443cd72b9ebd86cad47eb5dd4562c0ad"
+  },
+  "status": 500,
+  "headers": [
+    [
+      "content-length",
+      "33"
+    ],
+    [
+      "content-type",
+      "application/json"
+    ],
+    [
+      "date",
+      "Mon, 09 Nov 2026 22:56:25 GMT"
+    ],
+    [
+      "server",
+      "uvicorn"
+    ],
+    [
+      "x-audio-duration-seconds",
+      "1.428"
+    ]
+  ],
+  "body": "{\"detail\":\"Transcription failed\"}",
+  "body_len": 33
+}

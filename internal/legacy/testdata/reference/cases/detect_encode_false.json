@@ -1,0 +1,32 @@
+{
+  "request": {
+    "method": "POST",
+    "target": "/detect-language?encode=false",
+    "body_sha256": "7e4aacdde0e7d2764b8a2c4a615ba79a4447d8aec3275749e0687c553fe632ce"
+  },
+  "status": 200,
+  "headers": [
+    [
+      "content-length",
+      "115"
+    ],
+    [
+      "content-type",
+      "application/json"
+    ],
+    [
+      "date",
+      "Mon, 09 Nov 2026 22:56:34 GMT"
+    ],
+    [
+      "server",
+      "uvicorn"
+    ],
+    [
+      "x-audio-duration-seconds",
+      "1.428"
+    ]
+  ],
+  "body": "{\"detected_language\":\"english\",\"language_code\":\"en\",\"confidence\":0.9517726302146912,\"audio_duration_seconds\":1.428}",
+  "body_len": 115
+}

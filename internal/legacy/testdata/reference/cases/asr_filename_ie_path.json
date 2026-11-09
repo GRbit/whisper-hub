@@ -1,0 +1,40 @@
+{
+  "request": {
+    "method": "POST",
+    "target": "/asr",
+    "body_sha256": "58b9fc2f0f1507caa6094bab5507b3b0a3b1a2056aa4421d12bfaddc4d834bac"
+  },
+  "status": 200,
+  "headers": [
+    [
+      "asr-engine",
+      "faster_whisper"
+    ],
+    [
+      "content-disposition",
+      "attachment; filename=\"x.wav.txt\""
+    ],
+    [
+      "content-type",
+      "text/plain; charset=utf-8"
+    ],
+    [
+      "date",
+      "Mon, 09 Nov 2026 22:56:30 GMT"
+    ],
+    [
+      "server",
+      "uvicorn"
+    ],
+    [
+      "transfer-encoding",
+      "chunked"
+    ],
+    [
+      "x-audio-duration-seconds",
+      "1.428"
+    ]
+  ],
+  "body": "Front Center.\n",
+  "body_len": 14
+}

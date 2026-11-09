@@ -1,0 +1,27 @@
+{
+  "request": {
+    "method": "HEAD",
+    "target": "/docs"
+  },
+  "status": 200,
+  "headers": [
+    [
+      "content-length",
+      "931"
+    ],
+    [
+      "content-type",
+      "text/html; charset=utf-8"
+    ],
+    [
+      "date",
+      "Mon, 09 Nov 2026 22:56:34 GMT"
+    ],
+    [
+      "server",
+      "uvicorn"
+    ]
+  ],
+  "body": "",
+  "body_len": 0
+}

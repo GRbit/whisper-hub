@@ -1,0 +1,40 @@
+{
+  "request": {
+    "method": "POST",
+    "target": "/asr?encode=false\u0026output=srt",
+    "body_sha256": "7e4aacdde0e7d2764b8a2c4a615ba79a4447d8aec3275749e0687c553fe632ce"
+  },
+  "status": 200,
+  "headers": [
+    [
+      "asr-engine",
+      "faster_whisper"
+    ],
+    [
+      "content-disposition",
+      "attachment; filename=\"a.pcm.srt\""
+    ],
+    [
+      "content-type",
+      "text/plain; charset=utf-8"
+    ],
+    [
+      "date",
+      "Mon, 09 Nov 2026 22:56:30 GMT"
+    ],
+    [
+      "server",
+      "uvicorn"
+    ],
+    [
+      "transfer-encoding",
+      "chunked"
+    ],
+    [
+      "x-audio-duration-seconds",
+      "1.428"
+    ]
+  ],
+  "body": "1\n00:00:00,000 --\u003e 00:00:01,440\nFront Center.\n\n",
+  "body_len": 47
+}

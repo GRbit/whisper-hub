@@ -1,0 +1,27 @@
+{
+  "request": {
+    "method": "POST",
+    "target": "/asr?encode=maybe\u0026task=foo\u0026min_speakers=x\u0026output=json"
+  },
+  "status": 422,
+  "headers": [
+    [
+      "content-length",
+      "371"
+    ],
+    [
+      "content-type",
+      "application/json"
+    ],
+    [
+      "date",
+      "Mon, 09 Nov 2026 22:56:30 GMT"
+    ],
+    [
+      "server",
+      "uvicorn"
+    ]
+  ],
+  "body": "{\"detail\":[{\"type\":\"bool_parsing\",\"loc\":[\"query\",\"encode\"],\"msg\":\"Input should be a valid boolean, unable to interpret input\",\"input\":\"maybe\"},{\"type\":\"int_parsing\",\"loc\":[\"query\",\"min_speakers\"],\"msg\":\"Input should be a valid integer, unable to parse string as an integer\",\"input\":\"x\"},{\"type\":\"missing\",\"loc\":[\"body\",\"audio_file\"],\"msg\":\"Field required\",\"input\":null}]}",
+  "body_len": 371
+}

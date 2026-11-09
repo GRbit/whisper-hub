@@ -1,0 +1,28 @@
+{
+  "request": {
+    "method": "POST",
+    "target": "/asr",
+    "body_sha256": "2fcfc09c25b6fcf42e7232754b12be13e1beeae07b027426a9e803e6dcaf607f"
+  },
+  "status": 400,
+  "headers": [
+    [
+      "content-length",
+      "65"
+    ],
+    [
+      "content-type",
+      "application/json"
+    ],
+    [
+      "date",
+      "Mon, 09 Nov 2026 22:56:30 GMT"
+    ],
+    [
+      "server",
+      "uvicorn"
+    ]
+  ],
+  "body": "{\"detail\":\"Failed to decode audio (6 bytes, magic=78313367320a)\"}",
+  "body_len": 65
+}

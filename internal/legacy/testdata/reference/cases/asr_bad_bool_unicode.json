@@ -1,0 +1,28 @@
+{
+  "request": {
+    "method": "POST",
+    "target": "/asr?encode=%C3%BC%0A%FF",
+    "body_sha256": "e0c79e16532b280f73b836b8b459572f443cd72b9ebd86cad47eb5dd4562c0ad"
+  },
+  "status": 422,
+  "headers": [
+    [
+      "content-length",
+      "146"
+    ],
+    [
+      "content-type",
+      "application/json"
+    ],
+    [
+      "date",
+      "Mon, 09 Nov 2026 22:56:30 GMT"
+    ],
+    [
+      "server",
+      "uvicorn"
+    ]
+  ],
+  "body": "{\"detail\":[{\"type\":\"bool_parsing\",\"loc\":[\"query\",\"encode\"],\"msg\":\"Input should be a valid boolean, unable to interpret input\",\"input\":\"ü\\n�\"}]}",
+  "body_len": 146
+}
