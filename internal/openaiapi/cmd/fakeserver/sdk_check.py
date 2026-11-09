@@ -13,7 +13,13 @@ import sys
 
 import openai
 
-BASE, AUDIO = sys.argv[1], sys.argv[2]
+# --real-gateway: run against the real gateway with deploy/e2e's fake worker
+# instead of this fakeserver. Three checks assert tricks of the canned
+# service (the "unauth" model, the worker's own error text, an exact model
+# list); with the flag they are skipped or relaxed.
+REAL = "--real-gateway" in sys.argv
+args = [a for a in sys.argv[1:] if a != "--real-gateway"]
+BASE, AUDIO = args[0], args[1]
 TEXT = "Hello world. This is a test. Goodbye."
 c = openai.OpenAI(base_url=BASE, api_key="sk-test", max_retries=0)
 print("openai SDK", openai.__version__)
@@ -73,7 +79,7 @@ try:
         pass
     check("stream mid error raises", False)
 except openai.APIError as e:
-    check("stream mid error raises APIError", "went away" in str(e))
+    check("stream mid error raises APIError", REAL or "went away" in str(e))
 
 r = c.audio.translations.create(model="whisper-1", file=f())
 check("translation json", r.text == TEXT)
@@ -85,7 +91,12 @@ r = c.audio.translations.create(model="whisper-1", file=f(), response_format="sr
 check("translation srt", isinstance(r, str) and r.startswith("1\n"))
 
 ms = c.models.list()
-check("models.list", [m.id for m in ms.data] == ["tiny", "base", "whisper-1"] and ms.data[0].object == "model")
+ids = [m.id for m in ms.data]
+if REAL:
+    # The fake worker also serves its failure models; default first, alias last.
+    check("models.list", ids[0] == "tiny" and ids[-1] == "whisper-1" and "base" in ids and ms.data[0].object == "model")
+else:
+    check("models.list", ids == ["tiny", "base", "whisper-1"] and ms.data[0].object == "model")
 
 m = c.models.retrieve("whisper-1")
 check("models.retrieve alias", m.id == "whisper-1" and m.owned_by == "whisper-hub")
@@ -109,8 +120,13 @@ expect("model not found", openai.NotFoundError, 404,
        lambda: c.audio.transcriptions.create(model="missing", file=f()))
 expect("forbidden", openai.PermissionDeniedError, 403,
        lambda: c.audio.transcriptions.create(model="forbidden", file=f()))
-expect("unauthenticated", openai.AuthenticationError, 401,
-       lambda: c.audio.transcriptions.create(model="unauth", file=f()))
+if not REAL:
+    expect("unauthenticated", openai.AuthenticationError, 401,
+           lambda: c.audio.transcriptions.create(model="unauth", file=f()))
+else:
+    expect("unauthenticated", openai.AuthenticationError, 401,
+           lambda: openai.OpenAI(base_url=BASE, api_key="sk-wrong", max_retries=0).audio.transcriptions.create(
+               model="whisper-1", file=f()))
 expect("unavailable", openai.InternalServerError, 503,
        lambda: c.audio.transcriptions.create(model="busy", file=f()))
 expect("internal", openai.InternalServerError, 500,
