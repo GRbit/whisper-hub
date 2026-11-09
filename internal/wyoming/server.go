@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"sync"
@@ -185,7 +186,7 @@ func (s *Server) handleConn(shutdown, hard context.Context, nc net.Conn) {
 			log.Warn("wyoming connection rejected", "kind", core.KindOf(err).String(), "err", err)
 			c := &conn{s: s, nc: nc, w: newFrameWriter(nc), log: log}
 			c.sendError(core.KindOf(err).String(), core.ClientMessage(err))
-			_ = nc.Close()
+			lingerClose(nc)
 			return
 		}
 		if got != nil {
@@ -211,4 +212,19 @@ func (s *Server) handleConn(shutdown, hard context.Context, nc net.Conn) {
 	c.close()
 	c.jobs.Wait()
 	log.Debug("wyoming connection closed", "reason", reason)
+}
+
+// lingerClose closes a rejected connection without losing the error event
+// just sent. Clients such as Home Assistant write their whole utterance
+// before reading; closing with that data unread makes the kernel answer
+// with RST, which fails the client's writes and discards the error event
+// in its receive buffer. Half-closing and draining for a bounded time turns
+// that into an orderly FIN.
+func lingerClose(nc net.Conn) {
+	if tc, ok := nc.(*net.TCPConn); ok {
+		_ = tc.CloseWrite()
+		_ = nc.SetReadDeadline(time.Now().Add(2 * time.Second))
+		_, _ = io.CopyN(io.Discard, nc, 16<<20)
+	}
+	_ = nc.Close()
 }
