@@ -1,0 +1,132 @@
+# whisper-hub configuration example.
+#
+# Every key is optional: an empty file (or none at all) gives HTTP on :9000,
+# Wyoming on :10300, one engine worker at http://127.0.0.1:9100 and no
+# authentication. Values shown here are the defaults unless marked otherwise.
+#
+# Each setting can also be set by environment variable: WHISPER_HUB_ plus the
+# YAML path in upper case joined by "_", e.g. hub.queue_length ->
+# WHISPER_HUB_HUB_QUEUE_LENGTH. Lists are comma separated, maps are
+# key=value pairs, hub.workers takes YAML flow syntax.
+# Precedence: defaults < this file < environment < command line flags.
+
+http:
+  # Main listener: legacy API, OpenAI API, /healthz and the usage endpoint.
+  # The upstream --host/--port flags override it.
+  listen: ":9000"
+  # Optional second listener serving the same routes WITHOUT authentication,
+  # like the webservice port of the old bundled sidecar setup. Off when "".
+  open_listen: ""
+  # Running requests may finish for this long after SIGTERM. Give docker a
+  # longer stop_grace_period than this, or it kills the process first.
+  shutdown_grace: 30s
+
+log:
+  level: info # debug, info, warn, error (LOG_LEVEL also works)
+  format: text # text or json
+
+audio:
+  ffmpeg_path: ffmpeg
+  # Uploads are spooled here for ffmpeg (seekable input is needed for M4A
+  # with a trailing index). Default: the system temp directory. Point it at
+  # real disk when /tmp is a small tmpfs. Same as UPLOAD_SPOOL_DIR.
+  spool_dir: ""
+  # Keep every upload that fails to decode, with ffmpeg output, for replay.
+  # Stores raw user audio: debugging only. Same as DEBUG_FAILED_UPLOADS_DIR.
+  failed_uploads_dir: ""
+
+hub:
+  # Engine workers. Several workers may serve the same model id; jobs are
+  # spread between them.
+  workers:
+    - url: http://127.0.0.1:9100
+      max_in_flight: 1 # jobs sent to this worker at once
+  # Model used for requests without a model and for unknown names.
+  # Default "": the default model of the first healthy worker.
+  default_model: ""
+  # Public names for model ids; an empty target means the default model.
+  # whisper-1 -> default is always added unless you map it yourself.
+  aliases:
+    whisper-1: ""
+  # Unknown model names: "default" falls back to the default model (many
+  # OpenAI clients hardcode names), "error" answers model_not_found.
+  unknown_model: default
+  # Jobs waiting for a worker, across all workers; more get "busy".
+  queue_length: 100
+  # A waiting job gains one priority level per interval, so batch jobs
+  # cannot starve behind constant interactive (Wyoming) traffic. Negative
+  # disables aging.
+  priority_aging: 5m
+  poll_interval: 15s # re-probe of a healthy worker
+  retry_min: 1s # backoff bounds while a worker is down or loading
+  retry_max: 30s
+  fail_threshold: 2 # failed probes before a worker leaves rotation
+  connect_timeout: 5s
+  # Wait for the first response line of a job; covers lazy model loading.
+  # There is no overall job deadline: a long file can take an hour.
+  first_byte_timeout: 10m
+  probe_timeout: 30s
+
+auth:
+  # Users file. Empty turns authentication off (everyone is anonymous, as
+  # upstream). A missing file is created as an empty template that rejects
+  # everyone until it names a user. Edits are picked up automatically;
+  # SIGHUP reloads at once. See README "Users and model access".
+  users_file: ""
+  poll_interval: 5s
+  realm: whisper # browser login prompt on legacy paths
+  # Paths that need credentials; everything else is public.
+  protected_paths: ["/asr", "/detect-language", "/v1/"]
+  # Take the client address from X-Forwarded-For / X-Real-IP. Only behind a
+  # trusted reverse proxy.
+  trust_forwarded: false
+  anonymous:
+    # With authentication off, limit callers to the default model plus
+    # these patterns. Off by default: anonymous may use every model.
+    restrict: false
+    models: []
+  rate_limit:
+    failures: 10 # failed logins per window before 429; negative disables
+    window: 1m
+  wyoming:
+    # Wyoming has no credentials: connections act as this users file entry.
+    # With authentication on and no user, Wyoming connections are refused.
+    user: ""
+    allow_cidrs: [] # e.g. ["192.168.1.0/24"]; empty allows every source
+  usage:
+    totals_file: "" # per-user totals across restarts; "" keeps them in memory
+    snapshot_interval: 30s
+    log_file: "" # one JSON line per job and per rejected login; "" disables
+    log_max_bytes: 0 # rotate at this size; 0 never rotates
+    log_max_backups: 5
+
+legacy:
+  # whisper-asr-webservice API: /asr, /detect-language, /docs, /openapi.json.
+  max_upload_bytes: 0 # 0 = unlimited, as upstream
+  raw_sample_rate: 16000 # sample rate of encode=false uploads (SAMPLE_RATE)
+
+openai:
+  max_upload_bytes: 0 # 0 = unlimited
+  owned_by: whisper-hub
+
+wyoming:
+  enabled: true
+  listen: ":10300"
+  program_name: whisper-hub # entity name in Home Assistant
+  version: "" # default: the binary version
+  # Send transcript-start/chunk/stop events. Home Assistant ignores them.
+  stream_transcripts: false
+  max_header_bytes: 262144
+  max_data_bytes: 1048576
+  max_payload_bytes: 4194304
+  max_utterance_bytes: 67108864
+  max_utterance_duration: 5m
+  idle_timeout: 5m
+  write_timeout: 30s
+  max_connections: 64
+  shutdown_grace: 10s
+  zeroconf:
+    # mDNS announcement for Home Assistant discovery. Needs host networking.
+    enabled: false
+    name: whisper-hub
+    host: "" # default: the address of the interface routing to mDNS

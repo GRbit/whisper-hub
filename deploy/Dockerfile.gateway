@@ -1,0 +1,23 @@
+# Gateway only: the static whisper-hub binary plus ffmpeg. Engine workers
+# run in their own containers (see worker/).
+#
+# The build context is bin/, holding a static binary built on the host:
+#   make image-gateway
+# (CGO_ENABLED=0 go build -o bin/whisper-hub ./cmd/whisper-hub, then
+#  docker build -f deploy/Dockerfile.gateway bin)
+# Building on the host keeps a Go toolchain image out of the build.
+FROM alpine:3.22
+
+RUN apk add --no-cache ffmpeg \
+    && addgroup -S -g 65532 whisper \
+    && adduser -S -D -H -u 65532 -G whisper whisper \
+    && mkdir -p /config /data \
+    && chown whisper:whisper /data
+
+COPY whisper-hub /usr/local/bin/whisper-hub
+
+USER 65532:65532
+# 9000 HTTP (legacy, OpenAI, /healthz), 10300 Wyoming.
+EXPOSE 9000 10300
+ENTRYPOINT ["/usr/local/bin/whisper-hub"]
+CMD ["serve"]
