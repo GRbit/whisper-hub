@@ -576,7 +576,11 @@ func TestGracefulShutdownFinishesJobInFlight(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Run: %v", err)
 		}
-	case <-time.After(5 * time.Second):
+	// A hang bound, not a speed check: http.Server.Shutdown waits up to 5 s
+	// for connections that never sent a request, and Go's client transport
+	// leaves such spare connections in its pool, so 5 s here is too tight
+	// for a loaded machine.
+	case <-time.After(20 * time.Second):
 		t.Fatal("Run did not return after the job finished")
 	}
 }

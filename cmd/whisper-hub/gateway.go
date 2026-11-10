@@ -207,17 +207,20 @@ func (g *gateway) Run(ctx context.Context) error {
 		}()
 	}
 	wg.Wait()
+	g.log.Debug("shutdown: http servers drained")
 	if wyDone != nil && !wyStopped {
 		if err := <-wyDone; err != nil && runErr == nil {
 			runErr = err
 		}
 	}
+	g.log.Debug("shutdown: wyoming stopped")
 	// The worker goes last: requests still draining above need it.
 	if g.worker != nil {
 		g.worker.Stop()
 	}
 	stopAuth()
 	<-authDone
+	g.log.Debug("shutdown: auth stopped")
 	g.closeAll()
 	g.log.Info("stopped")
 	return runErr
