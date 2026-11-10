@@ -82,8 +82,7 @@ type WyomingConfig struct {
 type UsageConfig struct {
 	// TotalsFile persists per-user totals across restarts. It is rewritten
 	// atomically every SnapshotInterval when something changed, and on
-	// Close. Empty (the default) keeps totals in memory only. The format is
-	// a superset of the old sidecar usage.json, which loads as is.
+	// Close. Empty (the default) falls back to DefaultTotalsFile.
 	TotalsFile string `yaml:"totals_file"`
 	// DefaultTotalsFile is where totals persist while TotalsFile is empty;
 	// the images set it to /data/usage.json. Unlike TotalsFile it is best

@@ -76,8 +76,7 @@ e2e-clients: image-gateway image-e2e
 e2e-fake: image-gateway image-worker-fake image-e2e
 	deploy/e2e/stack.sh fake
 
-# All-in-one whisper-hub:$(ENGINE) with model tiny on real audio, and the
-# sidecar compatibility mode.
+# All-in-one whisper-hub:$(ENGINE) with model tiny on real audio.
 e2e-real: image image-e2e
 	deploy/e2e/stack.sh real
 

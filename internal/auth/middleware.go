@@ -17,7 +17,7 @@ import (
 //
 // Failures are written by the rejection writer registered for the path
 // (see New), so each API answers in its own dialect; unregistered paths get
-// the plain 401 with a Basic challenge the old sidecar returned. The
+// a plain-text 401 with a Basic challenge. The
 // error passed to a writer is a *core.Error of KindUnauthenticated with a
 // client-safe message; Retry-After is already set when the client is rate
 // limited.
@@ -90,7 +90,7 @@ func protocolOf(p string) string {
 }
 
 // Client-safe messages handed to the rejection writer. The default writer
-// ignores them and sends sidecar's fixed body.
+// ignores them and sends a fixed body.
 const (
 	msgMissing = "No credentials provided. Send an API key as \"Authorization: Bearer <key>\" or use HTTP Basic."
 	msgInvalid = "Incorrect API key or credentials provided."
@@ -123,8 +123,8 @@ func (a *Auth) rejecterFor(p string) func(http.ResponseWriter, error) {
 	return best
 }
 
-// challenge writes the 401 exactly as the old sidecar did. The header is
-// what makes a browser prompt for credentials rather than show an error.
+// challenge writes the default 401. The header is what makes a browser
+// prompt for credentials rather than show an error.
 func (a *Auth) challenge(w http.ResponseWriter, _ error) {
 	w.Header().Set("WWW-Authenticate", `Basic realm="`+a.cfg.Realm+`", charset="UTF-8"`)
 	http.Error(w, "unauthorized", http.StatusUnauthorized)

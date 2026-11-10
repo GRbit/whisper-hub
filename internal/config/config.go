@@ -10,8 +10,8 @@
 // WHISPER_HUB_HUB_WORKERS='[{url: "http://w:9100"}]'.
 //
 // The variables and flags of an existing whisper-asr-webservice deployment
-// (and of its sidecar sidecar) are accepted too, see applyCompat, so the
-// gateway can replace it without touching the deployment.
+// are accepted too, see applyCompat, so the gateway can replace it without
+// touching the deployment.
 package config
 
 import (
@@ -22,7 +22,6 @@ import (
 	"io"
 	"net"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -63,8 +62,8 @@ type HTTP struct {
 	// Default ":9000".
 	Listen string `yaml:"listen"`
 	// OpenListen, when set, serves the same routes on a second address
-	// without authentication, as the webservice port of the old bundled
-	// sidecar setup did. Default "": off.
+	// without authentication, for clients the network already restricts.
+	// Default "": off.
 	OpenListen string `yaml:"open_listen"`
 	// ShutdownGrace is how long running requests may finish after SIGTERM
 	// before they are cut off. Default 30s.
@@ -135,25 +134,18 @@ func Load(args []string, getenv func(string) (string, bool), out io.Writer) (Con
 		}
 		cfg.File = *file
 	}
-	compatOpen, err := applyCompat(&cfg, getenv)
-	if err != nil {
+	if err := applyCompat(&cfg, getenv); err != nil {
 		return Config{}, err
 	}
 	if err := applyEnv(&cfg, getenv); err != nil {
 		return Config{}, err
 	}
-	// The upstream flags address the webservice port, which is the open
-	// listener while the sidecar compatibility mode is on.
-	target := &cfg.HTTP.Listen
-	if compatOpen {
-		target = &cfg.HTTP.OpenListen
-	}
 	if host != "" || port != "" {
-		addr, err := withHostPort(*target, host, port)
+		addr, err := withHostPort(cfg.HTTP.Listen, host, port)
 		if err != nil {
 			return Config{}, err
 		}
-		*target = addr
+		cfg.HTTP.Listen = addr
 	}
 	return cfg, cfg.validate()
 }
@@ -231,13 +223,7 @@ func (c Config) resolved() Config {
 }
 
 // applyCompat maps the environment of a whisper-asr-webservice deployment.
-// It reports whether the sidecar bundled mode is on, in which case the
-// upstream --host/--port flags address the open listener.
-//
-// SIDECAR_* only count with SIDECAR_ENABLED, as they did upstream.
-// SIDECAR_UPSTREAM and SIDECAR_BACKEND_WAIT have no equivalent: there
-// is no proxy hop, and the hub tracks worker readiness itself.
-func applyCompat(c *Config, getenv func(string) (string, bool)) (bool, error) {
+func applyCompat(c *Config, getenv func(string) (string, bool)) error {
 	str := func(name string, dst *string) {
 		if v, ok := getenv(name); ok && v != "" {
 			*dst = v
@@ -245,54 +231,11 @@ func applyCompat(c *Config, getenv func(string) (string, bool)) (bool, error) {
 	}
 	str("UPLOAD_SPOOL_DIR", &c.Audio.SpoolDir)
 	str("DEBUG_FAILED_UPLOADS_DIR", &c.Audio.FailedUploadsDir)
-	_, hasLevel := getenv("LOG_LEVEL")
 	str("LOG_LEVEL", &c.Log.Level)
 	if v, ok := getenv("SAMPLE_RATE"); ok && v != "" {
 		if err := setValue(&c.Legacy.RawSampleRate, v); err != nil {
-			return false, fmt.Errorf("config: SAMPLE_RATE: %w", err)
+			return fmt.Errorf("config: SAMPLE_RATE: %w", err)
 		}
 	}
-
-	enabled, _ := getenv("SIDECAR_ENABLED")
-	switch strings.ToLower(enabled) {
-	case "true", "1", "yes":
-	default:
-		return false, nil
-	}
-	c.Auth.UsersFile = "/config/auth.yaml"
-	str("SIDECAR_CONFIG", &c.Auth.UsersFile)
-	c.HTTP.Listen = ":9001"
-	str("SIDECAR_LISTEN", &c.HTTP.Listen)
-	host, port := "", "9000"
-	str("WHISPER_HOST", &host)
-	str("WHISPER_PORT", &port)
-	open, err := withHostPort(":9000", host, port)
-	if err != nil {
-		return false, err
-	}
-	c.HTTP.OpenListen = open
-	dir := "/data/sidecar"
-	str("SIDECAR_USAGE_DIR", &dir)
-	c.Auth.Usage.TotalsFile = filepath.Join(dir, "usage.json")
-	c.Auth.Usage.LogFile = filepath.Join(dir, "usage.jsonl")
-	str("SIDECAR_REALM", &c.Auth.Realm)
-	if !hasLevel {
-		str("SIDECAR_LOG_LEVEL", &c.Log.Level)
-	}
-	for name, dst := range map[string]any{
-		"SIDECAR_CONFIG_POLL":       &c.Auth.PollInterval,
-		"SIDECAR_SNAPSHOT_INTERVAL": &c.Auth.Usage.SnapshotInterval,
-		"SIDECAR_MAX_UPLOAD_BYTES":  &c.Legacy.MaxUploadBytes,
-		"SIDECAR_TRUST_FORWARDED":   &c.Auth.TrustForwarded,
-	} {
-		if v, ok := getenv(name); ok && v != "" {
-			if err := setValue(dst, v); err != nil {
-				return false, fmt.Errorf("config: %s: %w", name, err)
-			}
-		}
-	}
-	// The proxy's limit covered every upload it saw; OpenAI is new here,
-	// but the same limit is the least surprising choice.
-	c.OpenAI.MaxUploadBytes = c.Legacy.MaxUploadBytes
-	return true, nil
+	return nil
 }

@@ -39,7 +39,6 @@ Non-goals:
 |---|---|
 | upstream | whisper-asr-webservice, the service whose API the legacy protocol reproduces |
 | reference | public upstream at a pinned commit, built and run unmodified, that whisper-hub is compared with byte for byte, see [Legacy compatibility](#legacy-compatibility) |
-| sidecar | an authentication proxy that earlier deployments ran in front of upstream. whisper-hub replaces it and accepts its settings, users file and usage files |
 | engine | a speech recognition library: `faster_whisper`, `whisperx`, `openai_whisper`, or the model-free `fake` used in tests |
 | worker | a Python process that runs one engine and serves one or more models over the internal [worker API](worker-api.md) |
 | gateway | the Go binary `whisper-hub`: everything except running models |
@@ -102,7 +101,7 @@ Consequences of the split:
 | `internal/hub/internal/workerclient` | HTTP client of the worker API, private to the hub | used by `internal/hub` only |
 | `internal/hub/workertest` | an in-process fake worker for tests | `New`, scripted responses, recorded jobs |
 | `internal/audio` | the `core.AudioDecoder` implementation: ffmpeg for files, pure Go conversion for raw PCM | `New(cfg, log)`, `Check`, `DecodeFile`, `FromRaw` |
-| `internal/config` | the whole configuration: defaults, YAML file, environment, flags, upstream and sidecar variables | `Load(args, getenv, out)`, `Config` |
+| `internal/config` | the whole configuration: defaults, YAML file, environment, flags, upstream variables | `Load(args, getenv, out)`, `Config` |
 | `internal/workerproc` | the worker as a child process of the gateway | `Start(cfg, env, log)`, `Proc.Done`, `Proc.Stop`, `Config.Env` |
 | `cmd/whisper-hub` | the binary: builds the modules, wires them together, handles signals | the command line |
 
@@ -364,15 +363,14 @@ When it is on:
   inotify is unreliable across bind mounts. A file that does not parse keeps
   the previous users. No users file problem prevents startup: a gateway
   that will not start cannot be fixed from inside its container.
-- Each API rejects in its own dialect. Legacy paths get exactly the 401 the
-  sidecar returned, with a Basic challenge; `/v1/` gets an OpenAI error
-  object.
+- Each API rejects in its own dialect. Legacy paths get a plain-text 401
+  with a Basic challenge, so browsers prompt for credentials; `/v1/` gets
+  an OpenAI error object.
 - Wyoming carries no credentials. Connections act as the users file entry
   named in `auth.wyoming.user`, optionally restricted to source networks in
   `auth.wyoming.allow_cidrs`.
 - `http.open_listen` serves the same routes on a second address without the
-  middleware. It exists to reproduce the sidecar deployment, where the
-  proxy port required credentials and the webservice port did not.
+  middleware, for clients whose access the network already restricts.
 
 ## Usage accounting
 
@@ -532,8 +530,8 @@ The deliberate deviations are listed in the
 ## Configuration
 
 All configuration is resolved in one place, `internal/config`, in increasing
-precedence: built-in defaults, one YAML file, the variables of an upstream or
-sidecar deployment, `WHISPER_HUB_*` variables, command line flags.
+precedence: built-in defaults, one YAML file, the variables of an upstream
+deployment, `WHISPER_HUB_*` variables, command line flags.
 
 - The environment variable of a setting is derived from its YAML path by
   reflection, so a new field gets its variable without extra code.
@@ -542,9 +540,8 @@ sidecar deployment, `WHISPER_HUB_*` variables, command line flags.
 - Zero values mean "default" and each package resolves its own defaults, so
   the defaults live next to the code that uses them.
 - Upstream's variables and flags (`--host`, `--port`, `LOG_LEVEL`,
-  `SAMPLE_RATE`, ...) and the sidecar's `SIDECAR_*` variables are
-  mapped onto the same settings, which is what makes the image a drop-in
-  replacement.
+  `SAMPLE_RATE`, ...) are mapped onto the same settings, which is what
+  makes the image a drop-in replacement.
 - Worker settings are not part of this: the worker reads its own environment
   variables, and in the all-in-one image it inherits the container's
   environment unchanged.

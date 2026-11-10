@@ -10,10 +10,9 @@ import (
 	"time"
 )
 
-func TestOldSidecarFileStillWorks(t *testing.T) {
-	// The exact shape of sidecar/auth.example.yaml with real hashes: an
-	// existing credentials file must keep working unchanged.
-	body := "# Credentials for the sidecar.\n" +
+func TestMinimalUsersFileWorks(t *testing.T) {
+	// Names and password hashes only: every other field is optional.
+	body := "# Credentials.\n" +
 		"users:\n" +
 		"  - name: alice\n" +
 		"    password_hash: \"" + hashOf(t, "secret") + "\"\n" +
@@ -21,7 +20,7 @@ func TestOldSidecarFileStillWorks(t *testing.T) {
 		"    password_hash: \"" + hashOf(t, "hunter2") + "\"\n"
 	a := newAuth(t, Config{UsersFile: writeFile(t, body), PollInterval: -1})
 	if userOf(a, basicReq("alice", "secret")) != "alice" || userOf(a, basicReq("bob", "hunter2")) != "bob" {
-		t.Error("an old sidecar credentials file no longer authenticates")
+		t.Error("a users file with names and password hashes only does not authenticate")
 	}
 }
 

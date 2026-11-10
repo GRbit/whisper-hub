@@ -63,7 +63,7 @@ They run real containers. The scripts are in `deploy/e2e/`.
 |---|---|---|
 | `make e2e-clients` | the openai Python SDK, the `wyoming` package, a replay of Home Assistant's speech-to-text client and zeroconf discovery, against the gateway image with a canned Go fake worker | Go and ffmpeg on the host |
 | `make e2e-fake` | gateway image plus the Python fake worker: all three protocols, streaming, cancellation on disconnect, priority order (read from the request log), authentication on and off | ffmpeg and python3 on the host |
-| `make e2e-real` | the all-in-one image with model `tiny` on real recordings, and the sidecar compatibility mode | `VOICE_FILES`; ffmpeg and python3 on the host; network access to download the model |
+| `make e2e-real` | the all-in-one image with model `tiny` on real recordings | `VOICE_FILES`; ffmpeg and python3 on the host; network access to download the model |
 | `make e2e-fidelity` | byte-for-byte comparison of legacy responses between the reference (built by `make image-reference`) and the all-in-one image, with whisper-hub's extensions applied explicitly | `VOICE_FILES`; network access to build the reference once; ffmpeg with AAC, MP3 and Opus encoders; python3 |
 | `make e2e-packages` | every Python package of the three single-engine images is installed in `whisper-hub:all` at the same version | the four images already built (`make image ENGINE=...`); python3 |
 | `make e2e` | `e2e-clients`, `e2e-fake`, `e2e-real`, `e2e-fidelity` | all of the above |
@@ -145,7 +145,7 @@ Gateway (Go):
 - `internal/audio/` - ffmpeg decoding through a spool file (`audio.go`) and
   pure Go PCM conversion and resampling (`raw.go`).
 - `internal/config/` - the whole configuration: defaults, YAML file,
-  upstream and sidecar variables (`applyCompat`), `WHISPER_HUB_*`
+  upstream variables (`applyCompat`), `WHISPER_HUB_*`
   variables derived from the YAML paths (`env.go`), flags.
 - `internal/workerproc/` - the worker as a child process, and the
   `ASR_ENGINE` check of the all-in-one images.
@@ -256,8 +256,8 @@ approval. That covers:
   reference. A legitimate change means running
   `internal/legacy/testdata/reference/capture.sh` against the reference
   again; never edit `internal/legacy/static/` or the recorded cases by hand.
-- **Deployment compatibility**: the upstream and sidecar environment
-  variables and flags that `internal/config` accepts, and the model cache
+- **Deployment compatibility**: the upstream environment variables and
+  flags that `internal/config` accepts, and the model cache
   path of the images.
 - **whisper-hub's own surface**: configuration keys (the `WHISPER_HUB_*`
   names are derived from the `yaml` tags, so renaming a tag renames a
@@ -282,8 +282,8 @@ Go client, the Go fake and `docs/worker-api.md` change together.
   The environment variable appears by itself. Add the key with
   its default to `deploy/whisper-hub.example.yaml`
   (`TestExampleConfigParses` fails on a key the code does not know), and to
-  the README if users need it. If it replaces an upstream or sidecar
-  variable, map that variable in `applyCompat` and extend
+  the README if users need it. If it replaces an upstream variable, map
+  that variable in `applyCompat` and extend
   `internal/config/config_test.go`.
 - **New engine backend**: add `worker/whisper_worker/engines/<name>.py` with
   a subclass of `Engine`: set `name` and `capabilities`, implement `load`,

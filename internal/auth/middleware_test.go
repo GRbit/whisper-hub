@@ -48,9 +48,9 @@ func TestPathPolicy(t *testing.T) {
 	}
 }
 
-func TestDefaultRejectionMatchesSidecar(t *testing.T) {
-	// Byte for byte what sidecar's Challenge wrote: http.Error plus a
-	// Basic challenge, which is what makes browsers show a login prompt.
+func TestDefaultRejectionIsPlainBasicChallenge(t *testing.T) {
+	// http.Error plus a Basic challenge, which is what makes browsers show
+	// a login prompt.
 	h := newUsersAuth(t).Middleware(echoIdentity)
 	for _, r := range []*http.Request{
 		httptest.NewRequest(http.MethodPost, "/asr", nil),

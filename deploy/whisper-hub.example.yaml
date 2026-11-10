@@ -10,7 +10,7 @@
 # key=value pairs, hub.workers takes YAML flow syntax.
 # Precedence: defaults < this file < environment < command line flags.
 # Within the environment, WHISPER_HUB_* variables win over the variables of
-# whisper-asr-webservice and its sidecar (LOG_LEVEL, SIDECAR_*, ...).
+# whisper-asr-webservice (LOG_LEVEL, UPLOAD_SPOOL_DIR, ...).
 # An unknown key in this file is an error.
 
 http:
@@ -18,8 +18,7 @@ http:
   # The upstream --host/--port flags override it.
   listen: ":9000"
   # Optional second listener serving the same routes WITHOUT authentication,
-  # like the open webservice port of an sidecar deployment (see README,
-  # "From the sidecar sidecar"). Off when "".
+  # for clients the network already restricts. Off when "".
   open_listen: ""
   # Running requests may finish for this long after SIGTERM. Give docker a
   # longer stop_grace_period than this, or it kills the process first.

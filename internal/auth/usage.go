@@ -27,8 +27,7 @@ type Counter struct {
 
 // UserTotals is the running total for one user.
 //
-// The top-level fields are those of the old sidecar usage.json, so its
-// snapshot loads unchanged. Billable and wasted audio stay separate: folding
+// Billable and wasted audio stay separate: folding
 // them together would either overcharge for failed work or hide how much
 // processing time is being lost.
 type UserTotals struct {
@@ -41,9 +40,6 @@ type UserTotals struct {
 	FailedSeconds float64 `json:"failed_seconds"`
 	// UnknownRequests failed before the audio length was known.
 	UnknownRequests int64 `json:"unknown_requests"`
-	// BytesIn is carried over from sidecar snapshots; the hub does not
-	// see upload sizes, so it never grows.
-	BytesIn int64 `json:"bytes_in,omitempty"`
 	// ProcessingSeconds is engine time (elapsed minus queued) over all jobs.
 	ProcessingSeconds float64 `json:"processing_seconds"`
 

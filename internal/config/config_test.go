@@ -122,17 +122,16 @@ func TestErrorsAreReported(t *testing.T) {
 		args []string
 		env  func(string) (string, bool)
 	}{
-		"bad duration":  {nil, envOf("WHISPER_HUB_HUB_POLL_INTERVAL", "soon")},
-		"bad int":       {nil, envOf("WHISPER_HUB_HUB_QUEUE_LENGTH", "many")},
-		"bad worker":    {nil, envOf("WHISPER_HUB_HUB_WORKERS", `[{adress: x}]`)},
-		"bad map":       {nil, envOf("WHISPER_HUB_HUB_ALIASES", "whisper-1")},
-		"bad level":     {nil, envOf("LOG_LEVEL", "loud")},
-		"bad format":    {nil, envOf("WHISPER_HUB_LOG_FORMAT", "xml")},
-		"missing file":  {[]string{"--config", "/nonexistent.yaml"}, envOf()},
-		"unknown key":   {[]string{"--config", writeFile(t, "hub: {queue_lenght: 3}\n")}, envOf()},
-		"stray args":    {[]string{"extra"}, envOf()},
-		"unknown flag":  {[]string{"--model", "x"}, envOf()},
-		"bad proxy var": {nil, envOf("SIDECAR_ENABLED", "true", "SIDECAR_CONFIG_POLL", "5")},
+		"bad duration": {nil, envOf("WHISPER_HUB_HUB_POLL_INTERVAL", "soon")},
+		"bad int":      {nil, envOf("WHISPER_HUB_HUB_QUEUE_LENGTH", "many")},
+		"bad worker":   {nil, envOf("WHISPER_HUB_HUB_WORKERS", `[{adress: x}]`)},
+		"bad map":      {nil, envOf("WHISPER_HUB_HUB_ALIASES", "whisper-1")},
+		"bad level":    {nil, envOf("LOG_LEVEL", "loud")},
+		"bad format":   {nil, envOf("WHISPER_HUB_LOG_FORMAT", "xml")},
+		"missing file": {[]string{"--config", "/nonexistent.yaml"}, envOf()},
+		"unknown key":  {[]string{"--config", writeFile(t, "hub: {queue_lenght: 3}\n")}, envOf()},
+		"stray args":   {[]string{"extra"}, envOf()},
+		"unknown flag": {[]string{"--model", "x"}, envOf()},
 	} {
 		if _, err := config.Load(tc.args, tc.env, io.Discard); err == nil {
 			t.Errorf("%s: accepted", name)
@@ -160,42 +159,6 @@ func TestUpstreamFlagsAndEnv(t *testing.T) {
 	}
 }
 
-func TestSidecarCompat(t *testing.T) {
-	// Without SIDECAR_ENABLED the proxy variables have no effect, as upstream.
-	cfg := load(t, nil, envOf("SIDECAR_CONFIG", "/x.yaml", "SIDECAR_LISTEN", ":1"))
-	if cfg.Auth.UsersFile != "" || cfg.HTTP.Listen != ":9000" {
-		t.Fatalf("proxy vars applied while disabled: %+v", cfg)
-	}
-
-	cfg = load(t, nil, envOf("SIDECAR_ENABLED", "true"))
-	if cfg.Auth.UsersFile != "/config/auth.yaml" || cfg.HTTP.Listen != ":9001" || cfg.HTTP.OpenListen != ":9000" ||
-		cfg.Auth.Usage.TotalsFile != "/data/sidecar/usage.json" || cfg.Auth.Usage.LogFile != "/data/sidecar/usage.jsonl" {
-		t.Fatalf("bundled defaults: %+v", cfg)
-	}
-
-	cfg = load(t, []string{"--port", "9200"}, envOf("SIDECAR_ENABLED", "1",
-		"SIDECAR_CONFIG", "/etc/auth.yaml", "SIDECAR_LISTEN", "0.0.0.0:8443",
-		"SIDECAR_USAGE_DIR", "/data/u", "SIDECAR_CONFIG_POLL", "10s", "SIDECAR_SNAPSHOT_INTERVAL", "1m",
-		"SIDECAR_REALM", "office", "SIDECAR_MAX_UPLOAD_BYTES", "1000", "SIDECAR_TRUST_FORWARDED", "true",
-		"SIDECAR_LOG_LEVEL", "debug", "WHISPER_HOST", "127.0.0.1",
-	))
-	a := cfg.Auth
-	if a.UsersFile != "/etc/auth.yaml" || cfg.HTTP.Listen != "0.0.0.0:8443" || a.PollInterval != 10*time.Second ||
-		a.Usage.SnapshotInterval != time.Minute || a.Realm != "office" || cfg.Legacy.MaxUploadBytes != 1000 || cfg.OpenAI.MaxUploadBytes != 1000 ||
-		!a.TrustForwarded || cfg.Log.Level != "debug" || a.Usage.TotalsFile != "/data/u/usage.json" {
-		t.Fatalf("%+v", cfg)
-	}
-	// --port addresses the open webservice port in bundled mode.
-	if cfg.HTTP.OpenListen != "127.0.0.1:9200" {
-		t.Fatalf("open listen %q", cfg.HTTP.OpenListen)
-	}
-	// LOG_LEVEL wins over the proxy's own level.
-	cfg = load(t, nil, envOf("SIDECAR_ENABLED", "true", "SIDECAR_LOG_LEVEL", "debug", "LOG_LEVEL", "ERROR"))
-	if cfg.Log.Level != "error" {
-		t.Fatalf("level %q", cfg.Log.Level)
-	}
-}
-
 // The images set only the default totals file, through the environment, so
 // a totals_file from the YAML file is never overridden by them.
 func TestImageTotalsDefaultDoesNotOverrideFile(t *testing.T) {
@@ -204,10 +167,6 @@ func TestImageTotalsDefaultDoesNotOverrideFile(t *testing.T) {
 	u := load(t, []string{"--config", file}, image).Auth.Usage
 	if u.TotalsFile != "/mine/usage.json" || u.DefaultTotalsFile != "/data/usage.json" {
 		t.Errorf("usage %+v", u)
-	}
-	u = load(t, nil, envOf("WHISPER_HUB_AUTH_USAGE_DEFAULT_TOTALS_FILE", "/data/usage.json", "SIDECAR_ENABLED", "true")).Auth.Usage
-	if u.TotalsFile != "/data/sidecar/usage.json" || u.DefaultTotalsFile != "/data/usage.json" {
-		t.Errorf("sidecar usage %+v", u)
 	}
 	// The documented opt-out: the variable set to the empty string.
 	u = load(t, nil, envOf("WHISPER_HUB_AUTH_USAGE_DEFAULT_TOTALS_FILE", "")).Auth.Usage

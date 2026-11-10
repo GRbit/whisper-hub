@@ -2,9 +2,8 @@
 # End-to-end runs against real containers (see stack_check.py):
 #   deploy/e2e/stack.sh fake   gateway image + Python fake worker image: protocols,
 #                              streaming, cancellation, priority (usage log), auth on and off
-#   deploy/e2e/stack.sh real   all-in-one image, model tiny on CPU, real audio, plus the
-#                              sidecar compatibility mode (SIDECAR_*). ENGINE picks the
-#                              image (whisper-hub:$ENGINE), ASR_ENGINE is passed to it if set.
+#   deploy/e2e/stack.sh real   all-in-one image, model tiny on CPU, real audio. ENGINE picks
+#                              the image (whisper-hub:$ENGINE), ASR_ENGINE is passed to it if set.
 # Images: GATEWAY_IMAGE, WORKER_IMAGE, AIO_IMAGE, E2E_IMAGE (built by make).
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
@@ -21,7 +20,7 @@ cache_volume="${CACHE_VOLUME:-whub-e2e-cache}"
 # required in real mode, optional in fake mode.
 voice="${VOICE_FILES:-}"
 net=whub-stack
-names=(whub-s-worker whub-s-gw whub-s-gw-auth whub-s-aio whub-s-aio-proxy)
+names=(whub-s-worker whub-s-gw whub-s-gw-auth whub-s-aio)
 work="$(mktemp -d)"
 cleanup() {
 	docker rm -f "${names[@]}" >/dev/null 2>&1 || true
@@ -121,30 +120,6 @@ else
 	echo "== all-in-one $aio_image ${ASR_ENGINE:+ASR_ENGINE=$ASR_ENGINE }-> $running, model tiny"
 	check --mode real --http http://whub-s-aio:9000 --wyoming whub-s-aio:10300 || status=1
 	docker rm -f whub-s-aio >/dev/null
-
-	# The old sidecar deployment, unchanged: bcrypt users file at
-	# SIDECAR_CONFIG, authenticated 9001, open 9000, usage in SIDECAR_USAGE_DIR.
-	printf 'users:\n  - name: alice\n    password_hash: "%s"\n' "$pw_hash" >"$work/auth.yaml"
-	chmod 644 "$work/auth.yaml"
-	docker run -d --name whub-s-aio-proxy --network "$net" -v "$cache_volume:/root/.cache" -v "$work/auth.yaml:/config/auth.yaml:ro" \
-		-v "$work/data:/data/sidecar" "${aio_env[@]}" -e SIDECAR_ENABLED=true -e SIDECAR_SNAPSHOT_INTERVAL=1s "$aio_image" >/dev/null
-	wait_healthy whub-s-aio-proxy 9001
-	echo "== sidecar compatibility: Basic auth on 9001"
-	check --mode real --http http://whub-s-aio-proxy:9001 --wyoming whub-s-aio-proxy:10300 --basic alice:e2e-secret --only legacy || status=1
-	echo "== sidecar compatibility: open port 9000"
-	check --mode real --http http://whub-s-aio-proxy:9000 --wyoming whub-s-aio-proxy:10300 --only legacy || status=1
-	code=$(docker run --rm --network "$net" --entrypoint python3 "$e2e_image" -c \
-		"import urllib.request,urllib.error
-try: urllib.request.urlopen(urllib.request.Request('http://whub-s-aio-proxy:9001/asr', data=b'x'))
-except urllib.error.HTTPError as e: print(e.code)")
-	[ "$code" = 401 ] && echo "ok   9001 without credentials -> 401" || { echo "FAIL 9001 without credentials -> $code"; status=1; }
-	sleep 2
-	if python3 -c "import json,sys; d=json.load(open('$work/data/usage.json')); sys.exit(0 if d['alice']['ok_requests']>0 else 1)" 2>/dev/null \
-		|| python3 -c "import json,sys; d=json.load(open('$work/data/usage.json')); sys.exit(0 if d['users']['alice']['ok_requests']>0 else 1)"; then
-		echo "ok   usage.json in SIDECAR_USAGE_DIR counts alice"
-	else
-		echo "FAIL usage.json"; ls -la "$work/data"; status=1
-	fi
 fi
 if [ "$status" != 0 ]; then
 	for n in "${names[@]}"; do docker logs "$n" >/dev/null 2>&1 && { echo "--- $n"; docker logs "$n" 2>&1 | grep -v DEBUG | tail -25; }; done

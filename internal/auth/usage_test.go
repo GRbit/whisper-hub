@@ -96,36 +96,6 @@ func TestTotalsSurviveRestart(t *testing.T) {
 	}
 }
 
-func TestOldSidecarSnapshotLoads(t *testing.T) {
-	// Verbatim from docs/auth-proxy.md: counters must carry over.
-	old := `{
-  "alice": {
-    "requests": 42,
-    "ok_requests": 40,
-    "failed_requests": 2,
-    "audio_seconds": 8130.5,
-    "failed_seconds": 300.0,
-    "unknown_requests": 1,
-    "bytes_in": 918273645,
-    "first_seen": "2026-08-01T09:12:03Z",
-    "last_seen": "2026-08-04T17:45:11Z"
-  }
-}`
-	file := filepath.Join(t.TempDir(), "usage.json")
-	if err := os.WriteFile(file, []byte(old), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	a := usageAuth(t, UsageConfig{TotalsFile: file})
-	a.Record(context.Background(), okEvent("alice", core.ProtocolLegacy, "tiny", 1.5))
-	got := a.Totals()["alice"]
-	if got.Requests != 43 || got.AudioSeconds != 8132 || got.BytesIn != 918273645 || got.UnknownRequests != 1 {
-		t.Errorf("merged totals = %+v", got)
-	}
-	if !got.FirstSeen.Equal(time.Date(2026, 8, 1, 9, 12, 3, 0, time.UTC)) {
-		t.Errorf("first_seen = %v", got.FirstSeen)
-	}
-}
-
 func TestCorruptSnapshotIsNotFatal(t *testing.T) {
 	file := filepath.Join(t.TempDir(), "usage.json")
 	if err := os.WriteFile(file, []byte("{not json"), 0o600); err != nil {

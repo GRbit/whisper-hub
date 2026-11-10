@@ -219,8 +219,7 @@ path in upper case with `_` between the parts.
 | `auth.protected_paths` | `WHISPER_HUB_AUTH_PROTECTED_PATHS=/asr,/v1/` (comma separated list) |
 | `wyoming.enabled` | `WHISPER_HUB_WYOMING_ENABLED=false` |
 
-The environment variables of upstream and of its sidecar sidecar are
-accepted as well, see
+The environment variables of upstream are accepted as well, see
 [Migrating](#migrating-from-whisper-asr-webservice). When both an upstream
 variable and a `WHISPER_HUB_` variable set the same thing, the
 `WHISPER_HUB_` one wins.
@@ -503,10 +502,9 @@ totals file they are loaded at startup, written every
 `auth.usage.snapshot_interval` (30s) when something changed, and written
 once more at shutdown; missing parent directories are created. Which file:
 
-- `auth.usage.totals_file`, when set by any means: the YAML file,
-  `WHISPER_HUB_AUTH_USAGE_TOTALS_FILE`, or `SIDECAR_USAGE_DIR` in the
-  sidecar compatibility mode. If its directory cannot be created,
-  startup fails.
+- `auth.usage.totals_file`, when set in the YAML file or through
+  `WHISPER_HUB_AUTH_USAGE_TOTALS_FILE`. If its directory cannot be
+  created, startup fails.
 - Otherwise `auth.usage.default_totals_file`, which the images set to
   `/data/usage.json` through `WHISPER_HUB_AUTH_USAGE_DEFAULT_TOTALS_FILE`.
   If `/data` is not writable (a read-only mount, a `--user` without write
@@ -565,37 +563,6 @@ volume:
 variables of upstream 1.10.0; they come from the patched build described
 under [Compatibility](#compatibility) and are accepted for deployments that
 used it.
-
-### From the sidecar sidecar
-
-"sidecar" is a small authentication proxy that some deployments ran in the
-same container as upstream: it listened on port 9001, checked HTTP Basic
-credentials against a users file, counted usage per user, and forwarded to
-upstream on port 9000. whisper-hub has all of that built in, and accepts the
-proxy's settings so that such a deployment keeps working unchanged.
-
-The `SIDECAR_*` variables count only when `SIDECAR_ENABLED=true`, as
-before. Then the gateway listens on two ports: `SIDECAR_LISTEN` (`:9001`)
-with authentication, and `WHISPER_HOST`:`WHISPER_PORT` (`:9000`) without,
-which is the port `--host`/`--port` then address. Publish only 9001 to
-require authentication from everyone.
-
-| sidecar | whisper-hub |
-|---|---|
-| `SIDECAR_CONFIG` (`/config/auth.yaml`) | `auth.users_file`; the old file loads as it is |
-| `SIDECAR_LISTEN` | `http.listen` |
-| `WHISPER_HOST`, `WHISPER_PORT` | `http.open_listen`, the port without authentication |
-| `SIDECAR_CONFIG_POLL` | `auth.poll_interval` |
-| `SIDECAR_USAGE_DIR` (`/data/sidecar`) | `usage.json` in it becomes `auth.usage.totals_file` (old totals load as they are); `usage.jsonl` in it becomes `auth.usage.log_file` (new lines also carry protocol, model and status, so old and new line shapes share the file) |
-| `SIDECAR_SNAPSHOT_INTERVAL` | `auth.usage.snapshot_interval` |
-| `SIDECAR_REALM` | `auth.realm` |
-| `SIDECAR_MAX_UPLOAD_BYTES` | `legacy.max_upload_bytes` and `openai.max_upload_bytes` |
-| `SIDECAR_TRUST_FORWARDED` | `auth.trust_forwarded` |
-| `SIDECAR_LOG_LEVEL` | `log.level`, unless `LOG_LEVEL` is set |
-| `SIDECAR_UPSTREAM`, `SIDECAR_BACKEND_WAIT` | no equivalent: there is no proxy hop, and worker readiness is tracked internally |
-
-The 401 on legacy paths is byte-identical to the proxy's. Its health
-endpoint `/_sidecar/healthz` is replaced by `/healthz`.
 
 ## Compatibility
 
@@ -721,7 +688,7 @@ model `tiny`.
   request shapes of existing whisper-asr-webservice clients (`POST
   /asr?task=transcribe&output=txt&encode=true[&language=..][&vad_filter=true]`,
   and `output=json` reading `text`), with and without Basic authentication
-  through the `SIDECAR_*` settings.
+  (Basic authentication with the fake engine only, `e2e-fake`).
 
 | Image | `ASR_ENGINE` | Real audio (`stack.sh real`) | Legacy fidelity (155 responses) |
 |---|---|---|---|
@@ -732,6 +699,10 @@ model `tiny`.
 | `whisper-hub:all` | `faster_whisper` | 47/47 | 155 identical |
 | `whisper-hub:all` | `openai_whisper` | 47/47 | 130 identical, 25 where upstream disagrees with itself, 0 unexplained |
 | `whisper-hub:all` | `whisperx` | 47/47 | not run; covered by the package check below |
+
+The real-audio counts above were measured while `stack.sh real` also
+checked a compatibility mode that has since been removed. The current
+script makes 21 checks; all pass for `whisper-hub:faster_whisper`.
 
 - **`whisper-hub:all` package check** (`make e2e-packages`): every Python
   package of the three single-engine images is installed in `:all` at the

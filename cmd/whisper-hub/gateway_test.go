@@ -740,7 +740,7 @@ func TestLegacyEveryOutputFormat(t *testing.T) {
 	}
 }
 
-func TestLegacyAuthBasicAndByteIdentical401(t *testing.T) {
+func TestLegacyAuthBasicAndPlain401(t *testing.T) {
 	w := workertest.New(t, workertest.DefaultInfo())
 	hash, err := auth.HashPassword("pw")
 	if err != nil {
@@ -753,8 +753,8 @@ func TestLegacyAuthBasicAndByteIdentical401(t *testing.T) {
 	r := startGateway(t, w, map[string]string{"WHISPER_HUB_AUTH_USERS_FILE": users})
 	audio := wav(t, 1)
 
-	// Exactly what the old sidecar sent (http.Error after setting the
-	// Basic challenge), so legacy clients and browsers behave the same.
+	// http.Error after setting the Basic challenge, so browsers prompt for
+	// credentials and legacy clients see a plain 401.
 	for _, c := range []cred{none, basic("bob", "wrong")} {
 		resp := asr(t, r.base, "/asr", c, audio)
 		body := readBody(t, resp)

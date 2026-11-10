@@ -55,7 +55,7 @@ func newGateway(ctx context.Context, cfg config.Config, log *slog.Logger) (_ *ga
 		return nil, fmt.Errorf("%w (install ffmpeg or set audio.ffmpeg_path)", err)
 	}
 	// Only /v1/ has its own rejection dialect; legacy paths get auth's
-	// default, the byte-identical 401 of the old sidecar.
+	// default 401 with a Basic challenge.
 	if g.auth, err = auth.New(cfg.Auth, map[string]func(http.ResponseWriter, error){"/v1/": openaiapi.WriteError}); err != nil {
 		return nil, err
 	}
@@ -75,8 +75,8 @@ func newGateway(ctx context.Context, cfg config.Config, log *slog.Logger) (_ *ga
 		return nil, err
 	}
 	if cfg.HTTP.OpenListen != "" {
-		// Deliberately without the auth middleware: this is the old open
-		// webservice port of the bundled sidecar setup.
+		// Deliberately without the auth middleware: the network decides who
+		// reaches this listener.
 		if err := g.listenHTTP(cfg.HTTP.OpenListen, mux); err != nil {
 			return nil, err
 		}
