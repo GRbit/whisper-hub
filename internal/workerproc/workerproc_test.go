@@ -23,7 +23,7 @@ func TestEnvEngineSelection(t *testing.T) {
 		t.Fatalf("matching ASR_ENGINE: %v %v", env, err)
 	}
 	_, err = c.Env([]string{"ASR_ENGINE=openai_whisper"})
-	if err == nil || !strings.Contains(err.Error(), "use the whisper-hub:openai_whisper image") {
+	if err == nil || !strings.Contains(err.Error(), "use the whisper-hub:openai_whisper or whisper-hub:all image") {
 		t.Fatalf("missing engine: %v", err)
 	}
 	_, err = Config{Engine: "faster_whisper", ImageTag: "whisper-hub:%s-gpu"}.Env([]string{"ASR_ENGINE=whisperx"})
@@ -32,6 +32,19 @@ func TestEnvEngineSelection(t *testing.T) {
 	}
 	if _, err := c.Env([]string{"ASR_ENGINE=vosk"}); err == nil || !strings.Contains(err.Error(), "not an engine") {
 		t.Fatalf("unknown engine: %v", err)
+	}
+	// The all-engines image behaves as upstream: unset means openai_whisper.
+	all := Config{Engine: EngineAll}
+	if env, err := all.Env(nil); err != nil || !slices.Equal(env, []string{"ASR_ENGINE=openai_whisper"}) {
+		t.Fatalf("all, unset: %v %v", env, err)
+	}
+	for _, e := range []string{"faster_whisper", "whisperx", "openai_whisper"} {
+		if _, err := all.Env([]string{"ASR_ENGINE=" + e}); err != nil {
+			t.Fatalf("all, %s: %v", e, err)
+		}
+	}
+	if _, err := all.Env([]string{"ASR_ENGINE=fake"}); err == nil {
+		t.Fatal("all image accepted the fake engine")
 	}
 	if env, err := (Config{}).Env([]string{"ASR_ENGINE=anything"}); err != nil || len(env) != 1 {
 		t.Fatalf("no engine configured: %v %v", env, err)

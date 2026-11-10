@@ -2,10 +2,9 @@
 # CUDA all-in-one image: like deploy/Dockerfile, on the CUDA base of
 # worker/Dockerfile.gpu. Run with --gpus all.
 #   docker build -f deploy/Dockerfile.gpu -t whisper-hub:faster_whisper-gpu .
-# ENGINE: faster_whisper (default) | whisperx | openai_whisper
+# ENGINE: faster_whisper (default) | whisperx | openai_whisper | all
 #
-# UNTESTED: the build machine has no GPU. The CPU image is verified end to
-# end; this file differs only in base image and torch index.
+# Differs from deploy/Dockerfile only in base image and torch index.
 ARG ENGINE=faster_whisper
 
 FROM onerahmet/ffmpeg:n7.1 AS ffmpeg
@@ -36,7 +35,7 @@ WORKDIR /app
 COPY worker/requirements/ requirements/
 RUN --mount=type=cache,target=/root/.cache/pip \
     case "${ENGINE}" in \
-      whisperx|openai_whisper) extra="--extra-index-url ${TORCH_INDEX}" ;; \
+      whisperx|openai_whisper|all) extra="--extra-index-url ${TORCH_INDEX}" ;; \
       faster_whisper) extra="" ;; \
       *) echo "unsupported ENGINE=${ENGINE} for the GPU image" >&2; exit 1 ;; \
     esac \

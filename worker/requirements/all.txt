@@ -1,0 +1,4 @@
+# All three engines in one environment, for the whisper-hub:all image. The
+# pins in constraints.txt come from the reference image, where they coexist.
+-r whisperx.txt
+openai-whisper==20250625

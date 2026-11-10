@@ -5,7 +5,9 @@
 # on 10300.
 #   docker build -f deploy/Dockerfile -t whisper-hub:faster_whisper .
 #   docker build -f deploy/Dockerfile --build-arg ENGINE=openai_whisper -t whisper-hub:openai_whisper .
-# ENGINE: faster_whisper (default, no torch) | whisperx | openai_whisper | fake
+# ENGINE: faster_whisper (default, no torch) | whisperx | openai_whisper | all | fake
+# "all" installs the three real engines; ASR_ENGINE picks one at startup and
+# defaults to openai_whisper there, as upstream.
 #
 # The gateway is PID 1 and starts the worker as its child (worker.command):
 # signals reach the process that knows the shutdown order, and the
@@ -36,7 +38,7 @@ WORKDIR /app
 COPY worker/requirements/ requirements/
 RUN --mount=type=cache,target=/root/.cache/pip \
     case "${ENGINE}" in \
-      whisperx|openai_whisper) extra="--extra-index-url ${TORCH_INDEX}" ;; \
+      whisperx|openai_whisper|all) extra="--extra-index-url ${TORCH_INDEX}" ;; \
       fake|faster_whisper) extra="" ;; \
       *) echo "unknown ENGINE=${ENGINE}" >&2; exit 1 ;; \
     esac \

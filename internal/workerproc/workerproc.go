@@ -23,7 +23,9 @@ type Config struct {
 	// "whisper_worker"]. Default empty: no managed worker.
 	Command []string `yaml:"command"`
 	// Engine is the engine installed next to Command. When set, ASR_ENGINE
-	// must be unset (it is then set to Engine) or equal to it. Default "".
+	// must be unset (it is then set to Engine) or equal to it. "all" means
+	// every real engine is installed: ASR_ENGINE picks one and defaults to
+	// openai_whisper, as upstream does. Default "": no check.
 	Engine string `yaml:"engine"`
 	// ImageTag is how the error for a missing engine names the image to
 	// use; "%s" is replaced by the requested engine. Default
@@ -36,6 +38,16 @@ type Config struct {
 
 // Engines are the ASR_ENGINE values the worker knows.
 var Engines = []string{"faster_whisper", "whisperx", "openai_whisper", "fake"}
+
+// realEngines are the engines an "all" image contains.
+var realEngines = Engines[:3]
+
+// EngineAll is Config.Engine for an image with every real engine.
+const EngineAll = "all"
+
+// UpstreamDefaultEngine is what whisper-asr-webservice runs when
+// ASR_ENGINE is unset.
+const UpstreamDefaultEngine = "openai_whisper"
 
 // Proc is a running worker process.
 type Proc struct {
@@ -59,10 +71,14 @@ func (c Config) Env(env []string) ([]string, error) {
 	if c.Engine == "" {
 		return env, nil
 	}
-	if requested == "" {
-		return append(slices.Clone(env), "ASR_ENGINE="+c.Engine), nil
+	installed, def := []string{c.Engine}, c.Engine
+	if c.Engine == EngineAll {
+		installed, def = realEngines, UpstreamDefaultEngine
 	}
-	if requested == c.Engine {
+	if requested == "" {
+		return append(slices.Clone(env), "ASR_ENGINE="+def), nil
+	}
+	if slices.Contains(installed, requested) {
 		return env, nil
 	}
 	tag := c.ImageTag
@@ -72,8 +88,8 @@ func (c Config) Env(env []string) ([]string, error) {
 	if !slices.Contains(Engines, requested) {
 		return nil, fmt.Errorf("ASR_ENGINE=%q is not an engine (%s)", requested, strings.Join(Engines, ", "))
 	}
-	return nil, fmt.Errorf("ASR_ENGINE=%s, but this image contains the %s engine only: use the %s image, or unset ASR_ENGINE",
-		requested, c.Engine, strings.ReplaceAll(tag, "%s", requested))
+	return nil, fmt.Errorf("ASR_ENGINE=%s, but this image contains the %s engine only: use the %s or %s image, or unset ASR_ENGINE",
+		requested, c.Engine, strings.ReplaceAll(tag, "%s", requested), strings.ReplaceAll(tag, "%s", EngineAll))
 }
 
 // Start launches the worker with env (normally os.Environ()). It returns a
