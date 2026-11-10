@@ -47,7 +47,7 @@ Run the all-in-one image and transcribe a file:
 
 ```bash
 docker run -d --name whisper -p 9000:9000 -p 10300:10300 -e WHISPER_HUB_ENGINE_MODEL=base \
-  -v whisper-cache:/root/.cache -v whisper-usage:/data ghcr.io/grbit/whisper-hub:edge
+  -v whisper-cache:/root/.cache -v whisper-usage:/data ghcr.io/grbit/whisper-hub:latest
 curl -F "audio_file=@meeting.mp3" "http://localhost:9000/asr?output=txt"
 ```
 
@@ -57,8 +57,8 @@ is loaded, requests and `http://localhost:9000/healthz` answer 503. The
 `whisper-usage` volume keeps the per-user usage totals (see
 [Usage accounting](#usage-accounting)).
 
-The example uses the `edge` tag because no version has been released yet:
-release tags such as `latest` appear with the first release. See
+`latest` is the newest release with the faster_whisper engine. To pin a
+version, pick another engine or follow development builds, see
 [Tags](#tags).
 
 To build the image from a checkout instead of pulling it:
@@ -98,7 +98,7 @@ name from the table above (`faster_whisper`, `whisperx`, `all`,
 | Channel | Tag form | Example | Points at |
 |---|---|---|---|
 | edge | `edge-<variant>` | `whisper-hub:edge-whisperx` | the newest commit on the `master` branch. It moves with every push, and is not a release |
-| commit | `sha-<commit>-<variant>` | `whisper-hub:sha-a53e998-whisperx` | the build of one `master` commit (first 7 characters of its hash). It never moves |
+| commit | `sha-<commit>-<variant>` | `whisper-hub:sha-1a2b3c4-whisperx` | the build of one `master` commit (first 7 characters of its hash). It never moves |
 | version | `<version>-<variant>` | `whisper-hub:1.2.3-whisperx` | the release made from git tag `v1.2.3`. It never moves |
 | latest release | `<variant>` | `whisper-hub:whisperx` | the newest release of that variant. It moves with every release |
 
@@ -117,10 +117,9 @@ them; use `faster_whisper-gpu`, `edge-faster_whisper-gpu` and so on.
 
 Which one to use:
 
-- `edge` (or `edge-<variant>`) to follow development. This is the only
-  channel that exists before the first release.
-- `latest` (or `<variant>`) to follow releases, once there is one.
+- `latest` (or `<variant>`) to follow releases.
 - A version tag or a `sha-` tag to pin a deployment to one build.
+- `edge` (or `edge-<variant>`) to follow development between releases.
 
 Tags starting with `buildcache` hold CI's layer cache. They are not
 runnable images.
@@ -148,7 +147,7 @@ NVIDIA Container Toolkit on the host:
 ```bash
 docker run -d --gpus all -p 9000:9000 -p 10300:10300 \
   -e WHISPER_HUB_ENGINE_MODEL=large-v3 -e WHISPER_HUB_ENGINE_QUANTIZATION=float16 \
-  -v whisper-cache:/root/.cache -v whisper-usage:/data ghcr.io/grbit/whisper-hub:edge-faster_whisper-gpu
+  -v whisper-cache:/root/.cache -v whisper-usage:/data ghcr.io/grbit/whisper-hub:faster_whisper-gpu
 ```
 
 As upstream: `WHISPER_HUB_ENGINE_DEVICE` defaults to `cuda` when a GPU is
@@ -475,7 +474,7 @@ next to the totals. Without compose:
 ```bash
 docker run -d -p 9000:9000 -v whisper-cache:/root/.cache -v whisper-usage:/data \
   -e WHISPER_HUB_AUTH_USAGE_LOG_FILE=/data/requests.jsonl \
-  ghcr.io/grbit/whisper-hub:edge
+  ghcr.io/grbit/whisper-hub:latest
 ```
 
 **The log line** is written at Info level for every job and needs no
