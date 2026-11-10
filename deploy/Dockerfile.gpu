@@ -45,7 +45,7 @@ COPY worker/whisper_worker/ whisper_worker/
 
 COPY --from=ffmpeg /usr/local/bin/ffmpeg /usr/local/bin/ffmpeg
 COPY --from=gateway /out/whisper-hub /usr/local/bin/whisper-hub
-RUN ln -s whisper-hub /usr/local/bin/whisper-asr-webservice
+RUN ln -s whisper-hub /usr/local/bin/whisper-asr-webservice && mkdir -p /data
 
 # See deploy/Dockerfile for why ASR_ENGINE is not set and the worker port.
 ENV WHISPER_HUB_WORKER_COMMAND="[python, -m, whisper_worker]" \
@@ -56,6 +56,10 @@ ENV WHISPER_HUB_WORKER_COMMAND="[python, -m, whisper_worker]" \
     WORKER_HOST=127.0.0.1 \
     WORKER_PORT=19100 \
     WORKER_PRELOAD=true
+
+# See deploy/Dockerfile for the usage totals default.
+ENV WHISPER_HUB_AUTH_USAGE_DEFAULT_TOTALS_FILE=/data/usage.json
+VOLUME /data
 
 EXPOSE 9000 10300
 HEALTHCHECK --interval=30s --start-period=10m CMD ["whisper-hub", "healthcheck"]

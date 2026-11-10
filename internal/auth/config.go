@@ -85,6 +85,12 @@ type UsageConfig struct {
 	// Close. Empty (the default) keeps totals in memory only. The format is
 	// a superset of the old sidecar usage.json, which loads as is.
 	TotalsFile string `yaml:"totals_file"`
+	// DefaultTotalsFile is where totals persist while TotalsFile is empty;
+	// the images set it to /data/usage.json. Unlike TotalsFile it is best
+	// effort: an unwritable location keeps totals in memory with a warning.
+	// While TotalsFile does not exist or is empty, a non-empty
+	// DefaultTotalsFile is moved there. Default "": none.
+	DefaultTotalsFile string `yaml:"default_totals_file"`
 	// SnapshotInterval is how often TotalsFile is written. Default 30s.
 	SnapshotInterval time.Duration `yaml:"snapshot_interval"`
 	// LogFile receives one JSON line per job and per rejected login.

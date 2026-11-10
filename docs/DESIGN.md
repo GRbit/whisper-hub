@@ -394,9 +394,11 @@ whose client disconnected is still recorded.
    transcription.
 3. Writes the one Info log line of the job.
 
-The totals are written to `auth.usage.totals_file` atomically (temporary
-file, fsync, rename) every `auth.usage.snapshot_interval` when they changed,
-and once more at shutdown. They are served to admin users at
+The totals are written to `auth.usage.totals_file` (while it is unset, to
+`auth.usage.default_totals_file`, which the images point at
+`/data/usage.json`) atomically (temporary file, fsync, rename) every
+`auth.usage.snapshot_interval` when they changed, and once more at
+shutdown. They are served to admin users at
 `GET /_hub/usage`.
 
 Requests that never become a job are not usage: a failed login, an invalid

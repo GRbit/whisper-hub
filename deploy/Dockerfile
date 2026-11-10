@@ -48,7 +48,7 @@ COPY worker/whisper_worker/ whisper_worker/
 
 COPY --from=ffmpeg /usr/local/bin/ffmpeg /usr/local/bin/ffmpeg
 COPY --from=gateway /out/whisper-hub /usr/local/bin/whisper-hub
-RUN ln -s whisper-hub /usr/local/bin/whisper-asr-webservice
+RUN ln -s whisper-hub /usr/local/bin/whisper-asr-webservice && mkdir -p /data
 
 # ASR_ENGINE is deliberately not set: unset means "this image's engine"
 # (upstream defaults to openai_whisper), and a different value fails at
@@ -64,6 +64,12 @@ ENV WHISPER_HUB_WORKER_COMMAND="[python, -m, whisper_worker]" \
     WORKER_PORT=19100 \
     WORKER_PRELOAD=true \
     WHISPER_HUB_HUB_RETRY_MAX=2s
+
+# Usage totals persist to /data/usage.json without any configuration; an
+# explicit auth.usage.totals_file wins (and the totals move there), and
+# WHISPER_HUB_AUTH_USAGE_DEFAULT_TOTALS_FILE= (empty) keeps them in memory.
+ENV WHISPER_HUB_AUTH_USAGE_DEFAULT_TOTALS_FILE=/data/usage.json
+VOLUME /data
 
 # Root, like upstream: existing cache volumes on /root/.cache are root-owned.
 EXPOSE 9000 10300

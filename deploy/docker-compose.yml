@@ -21,9 +21,12 @@ services:
     volumes:
       # Same path as upstream, so an existing model cache volume is reused.
       - cache-whisper:/root/.cache
+      # Usage totals (/data/usage.json), kept across container replacements.
+      - usage-data:/data
     # Longer than http.shutdown_grace (30s), so running jobs can finish.
     stop_grace_period: 40s
     restart: unless-stopped
 
 volumes:
   cache-whisper:
+  usage-data:

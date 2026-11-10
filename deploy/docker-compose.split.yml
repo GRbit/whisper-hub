@@ -13,6 +13,9 @@ services:
     ports:
       - "9000:9000"
       - "10300:10300"
+    volumes:
+      # Usage totals (/data/usage.json), kept across container replacements.
+      - usage-data:/data
     stop_grace_period: 40s
     restart: unless-stopped
 
@@ -48,3 +51,4 @@ services:
 
 volumes:
   cache-whisper:
+  usage-data:

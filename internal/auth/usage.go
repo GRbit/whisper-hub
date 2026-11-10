@@ -84,6 +84,9 @@ type logEntry struct {
 // log. It implements core.UsageRecorder.
 type recorder struct {
 	cfg UsageConfig
+	// totalsPath is where totals persist: TotalsFile, else
+	// DefaultTotalsFile when usable, else "" (memory only).
+	totalsPath string
 
 	// Guards totals only; the log has its own lock so a slow disk write
 	// never blocks accounting.
@@ -107,44 +110,145 @@ var _ core.UsageRecorder = (*recorder)(nil)
 func newRecorder(cfg UsageConfig) (*recorder, error) {
 	cfg = cfg.resolved()
 	r := &recorder{cfg: cfg, totals: make(map[string]*UserTotals), now: time.Now}
-	if cfg.TotalsFile != "" {
+	switch {
+	case cfg.TotalsFile != "":
+		r.totalsPath = cfg.TotalsFile
 		if err := os.MkdirAll(filepath.Dir(cfg.TotalsFile), 0o755); err != nil {
 			return nil, fmt.Errorf("create usage totals dir: %w", err)
 		}
-		if err := r.restore(); err != nil {
-			// Not fatal: the request log is authoritative and totals can be
-			// rebuilt from it.
-			slog.Error("auth: could not restore usage totals, starting from zero",
-				"path", cfg.TotalsFile, "error", err)
+		if cfg.DefaultTotalsFile != "" && r.moveFrom(cfg.DefaultTotalsFile) {
+			break
 		}
+		r.restoreOrReset()
+	case cfg.DefaultTotalsFile != "":
+		// The default was not asked for, so a read-only /data or a non-root
+		// user must not stop the service: degrade to memory instead.
+		if err := checkWritableDir(filepath.Dir(cfg.DefaultTotalsFile)); err != nil {
+			slog.Warn("auth: default usage totals file is not writable, keeping totals in memory only",
+				"path", cfg.DefaultTotalsFile, "error", err)
+			break
+		}
+		r.totalsPath = cfg.DefaultTotalsFile
+		r.restoreOrReset()
 	}
+	slog.Debug("auth: usage totals location", "path", r.totalsPath)
 	if err := r.reopenLog(); err != nil {
 		return nil, err
 	}
 	return r, nil
 }
 
-func (r *recorder) restore() error {
-	raw, err := os.ReadFile(r.cfg.TotalsFile)
-	if errors.Is(err, fs.ErrNotExist) {
-		return nil
+func checkWritableDir(dir string) error {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
 	}
+	f, err := os.CreateTemp(dir, ".write-check-*")
 	if err != nil {
 		return err
 	}
+	f.Close()
+	return os.Remove(f.Name())
+}
+
+func (r *recorder) restoreOrReset() {
+	if err := r.restore(); err != nil {
+		// Not fatal: the request log is authoritative and totals can be
+		// rebuilt from it.
+		slog.Error("auth: could not restore usage totals, starting from zero",
+			"path", r.totalsPath, "error", err)
+	}
+}
+
+// moveFrom moves the totals in old to totalsPath while totalsPath is
+// missing or empty, and reports whether it loaded them. The old file is
+// removed only after the new one is written, so a failure at any step
+// leaves the data in at least one of the two.
+func (r *recorder) moveFrom(old string) bool {
+	if sameFile(old, r.totalsPath) {
+		return false
+	}
+	if st, err := os.Stat(r.totalsPath); err == nil && st.Size() > 0 {
+		slog.Debug("auth: usage totals file has content, default file left alone",
+			"path", r.totalsPath, "default", old)
+		return false
+	}
+	raw, err := os.ReadFile(old)
+	if errors.Is(err, fs.ErrNotExist) || (err == nil && len(raw) == 0) {
+		return false
+	}
+	users := 0
+	if err == nil {
+		var totals map[string]*UserTotals
+		if totals, err = parseTotals(raw); err == nil {
+			users = len(totals)
+			r.mu.Lock()
+			r.totals = totals
+			r.mu.Unlock()
+		}
+	}
+	if err != nil {
+		slog.Warn("auth: could not read the default usage totals file, not moving it",
+			"from", old, "to", r.totalsPath, "error", err)
+		return false
+	}
+	if err := writeAtomic(r.totalsPath, raw); err != nil {
+		// The totals are loaded; the next snapshot retries the write.
+		r.mu.Lock()
+		r.dirty = true
+		r.mu.Unlock()
+		slog.Warn("auth: could not move usage totals, the old file is kept",
+			"from", old, "to", r.totalsPath, "error", err)
+		return true
+	}
+	if err := os.Remove(old); err != nil {
+		slog.Warn("auth: usage totals moved, but the old file could not be removed; it is no longer read",
+			"from", old, "to", r.totalsPath, "error", err)
+		return true
+	}
+	slog.Info("auth: usage totals moved", "from", old, "to", r.totalsPath, "users", users)
+	return true
+}
+
+// sameFile also catches one file reached through two spellings or a bind
+// mount.
+func sameFile(a, b string) bool {
+	if filepath.Clean(a) == filepath.Clean(b) {
+		return true
+	}
+	sa, errA := os.Stat(a)
+	sb, errB := os.Stat(b)
+	return errA == nil && errB == nil && os.SameFile(sa, sb)
+}
+
+func parseTotals(raw []byte) (map[string]*UserTotals, error) {
 	totals := make(map[string]*UserTotals)
 	if err := json.Unmarshal(raw, &totals); err != nil {
-		return err
+		return nil, err
 	}
 	for name, t := range totals {
 		if t == nil {
 			delete(totals, name)
 		}
 	}
+	return totals, nil
+}
+
+func (r *recorder) restore() error {
+	raw, err := os.ReadFile(r.totalsPath)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	totals, err := parseTotals(raw)
+	if err != nil {
+		return err
+	}
 	r.mu.Lock()
 	r.totals = totals
 	r.mu.Unlock()
-	slog.Info("auth: usage totals restored", "path", r.cfg.TotalsFile, "users", len(totals))
+	slog.Info("auth: usage totals restored", "path", r.totalsPath, "users", len(totals))
 	return nil
 }
 
@@ -348,12 +452,12 @@ func (r *recorder) Totals() map[string]UserTotals {
 	return out
 }
 
-// Save writes the totals to TotalsFile if they changed since the last save.
+// Save writes the totals to their file if they changed since the last save.
 //
 // Atomic: a reader sees either the whole previous snapshot or the whole new
 // one, never a half-written file.
 func (r *recorder) Save() error {
-	if r.cfg.TotalsFile == "" {
+	if r.totalsPath == "" {
 		return nil
 	}
 	r.saveMu.Lock()
@@ -370,7 +474,7 @@ func (r *recorder) Save() error {
 	// copy and re-marks dirty, so at worst it is written twice, never lost.
 	data, err := json.MarshalIndent(r.Totals(), "", "  ")
 	if err == nil {
-		err = writeAtomic(r.cfg.TotalsFile, append(data, '\n'))
+		err = writeAtomic(r.totalsPath, append(data, '\n'))
 	}
 	if err != nil {
 		r.mu.Lock()
@@ -378,7 +482,7 @@ func (r *recorder) Save() error {
 		r.mu.Unlock()
 		return err
 	}
-	slog.Debug("auth: usage totals saved", "path", r.cfg.TotalsFile)
+	slog.Debug("auth: usage totals saved", "path", r.totalsPath)
 	return nil
 }
 
@@ -415,7 +519,7 @@ func writeAtomic(path string, data []byte) error {
 
 // Run saves the totals every SnapshotInterval until ctx is cancelled.
 func (r *recorder) Run(ctx context.Context) {
-	if r.cfg.TotalsFile == "" {
+	if r.totalsPath == "" {
 		return
 	}
 	t := time.NewTicker(r.cfg.SnapshotInterval)
@@ -426,7 +530,7 @@ func (r *recorder) Run(ctx context.Context) {
 			return
 		case <-t.C:
 			if err := r.Save(); err != nil {
-				slog.Error("auth: periodic usage snapshot failed", "path", r.cfg.TotalsFile, "error", err)
+				slog.Error("auth: periodic usage snapshot failed", "path", r.totalsPath, "error", err)
 			}
 		}
 	}

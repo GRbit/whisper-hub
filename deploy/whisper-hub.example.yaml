@@ -102,7 +102,15 @@ auth:
   # Usage accounting, see README "Usage accounting". It works with
   # authentication off too (the user is then "anonymous").
   usage:
-    totals_file: "" # per-user totals across restarts; "" keeps them in memory
+    # Per-user totals across restarts. "" falls back to default_totals_file.
+    totals_file: ""
+    # Used while totals_file is "". The images set it to /data/usage.json
+    # through WHISPER_HUB_AUTH_USAGE_DEFAULT_TOTALS_FILE; "" (the binary's
+    # default) keeps totals in memory. If it cannot be written, totals stay
+    # in memory with a warning. When totals_file is set but missing or
+    # empty, this file is moved there at startup. Because the environment
+    # beats this file, opt out in an image by setting that variable to "".
+    default_totals_file: ""
     snapshot_interval: 30s # how often totals_file is rewritten when changed
     log_file: "" # one JSON line per job and per rejected login; "" disables
     log_max_bytes: 0 # rotate at this size; 0 never rotates

@@ -24,6 +24,11 @@ COPY --from=build /out/whisper-hub /usr/local/bin/whisper-hub
 RUN ln -s whisper-hub /usr/local/bin/whisper-asr-webservice \
     && groupadd -r -g 65532 whisper && useradd -r -u 65532 -g whisper -d /data -M whisper \
     && mkdir -p /config /data && chown whisper:whisper /data
+# Usage totals persist to /data/usage.json without any configuration; an
+# explicit auth.usage.totals_file wins (and the totals move there), and
+# WHISPER_HUB_AUTH_USAGE_DEFAULT_TOTALS_FILE= (empty) keeps them in memory.
+ENV WHISPER_HUB_AUTH_USAGE_DEFAULT_TOTALS_FILE=/data/usage.json
+VOLUME /data
 USER 65532:65532
 # 9000 HTTP (legacy, OpenAI, /healthz), 10300 Wyoming.
 EXPOSE 9000 10300

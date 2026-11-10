@@ -47,13 +47,15 @@ Run the all-in-one image and transcribe a file:
 
 ```bash
 docker run -d --name whisper -p 9000:9000 -p 10300:10300 -e ASR_MODEL=base \
-  -v whisper-cache:/root/.cache ghcr.io/grbit/whisper-hub:edge
+  -v whisper-cache:/root/.cache -v whisper-usage:/data ghcr.io/grbit/whisper-hub:edge
 curl -F "audio_file=@meeting.mp3" "http://localhost:9000/asr?output=txt"
 ```
 
 `meeting.mp3` stands for any audio or video file ffmpeg can read. The first
 start downloads the model into the `whisper-cache` volume; until the model
-is loaded, requests and `http://localhost:9000/healthz` answer 503.
+is loaded, requests and `http://localhost:9000/healthz` answer 503. The
+`whisper-usage` volume keeps the per-user usage totals (see
+[Usage accounting](#usage-accounting)).
 
 The example uses the `edge` tag because no version has been released yet:
 release tags such as `latest` appear with the first release. See
@@ -146,7 +148,7 @@ NVIDIA Container Toolkit on the host:
 ```bash
 docker run -d --gpus all -p 9000:9000 -p 10300:10300 \
   -e ASR_MODEL=large-v3 -e ASR_QUANTIZATION=float16 \
-  -v whisper-cache:/root/.cache ghcr.io/grbit/whisper-hub:edge-faster_whisper-gpu
+  -v whisper-cache:/root/.cache -v whisper-usage:/data ghcr.io/grbit/whisper-hub:edge-faster_whisper-gpu
 ```
 
 As upstream: `ASR_DEVICE` defaults to `cuda` when a GPU is visible and to
@@ -442,16 +444,17 @@ There are four places to read it:
 |---|---|---|
 | Log line `job finished` on stderr | yes | one line per job |
 | Request log file | no: set `auth.usage.log_file` | one JSON line per job, and one per rejected login |
-| Totals file | no: set `auth.usage.totals_file` | running totals per user, kept across restarts |
+| Totals file | in the images: `/data/usage.json`; the bare binary: set `auth.usage.totals_file` | running totals per user, kept across restarts |
 | `GET /_hub/usage` | needs authentication on, and an admin user | the current totals per user |
 
-The compose overlay `deploy/docker-compose.auth.yml` turns the two files on
-(`/data/usage.json` and `/data/requests.jsonl` in the `usage-data` volume).
-Without compose:
+Every image that contains the gateway declares `/data` as a volume and
+writes the totals to `/data/usage.json` there; mount a named volume on
+`/data` so they survive a replaced container. The compose files do (`usage-data`), and the overlay
+`deploy/docker-compose.auth.yml` adds the request log `/data/requests.jsonl`
+next to the totals. Without compose:
 
 ```bash
 docker run -d -p 9000:9000 -v whisper-cache:/root/.cache -v whisper-usage:/data \
-  -e WHISPER_HUB_AUTH_USAGE_TOTALS_FILE=/data/usage.json \
   -e WHISPER_HUB_AUTH_USAGE_LOG_FILE=/data/requests.jsonl \
   ghcr.io/grbit/whisper-hub:edge
 ```
@@ -495,11 +498,34 @@ jq -s 'map(select(.status == "ok")) | group_by(.user)
 | `first_seen`, `last_seen` | time of the first and the latest job |
 | `by_protocol`, `by_model` | `requests`, `ok_requests`, `failed_requests` and `audio_seconds` per protocol and per model |
 
-The totals are always kept in memory, counting from process start. With
-`auth.usage.totals_file` set they are loaded at startup, written every
+The totals are always kept in memory, counting from process start. With a
+totals file they are loaded at startup, written every
 `auth.usage.snapshot_interval` (30s) when something changed, and written
-once more at shutdown. The file is a JSON object with the user names as
-keys:
+once more at shutdown; missing parent directories are created. Which file:
+
+- `auth.usage.totals_file`, when set by any means: the YAML file,
+  `WHISPER_HUB_AUTH_USAGE_TOTALS_FILE`, or `SIDECAR_USAGE_DIR` in the
+  sidecar compatibility mode. If its directory cannot be created,
+  startup fails.
+- Otherwise `auth.usage.default_totals_file`, which the images set to
+  `/data/usage.json` through `WHISPER_HUB_AUTH_USAGE_DEFAULT_TOTALS_FILE`.
+  If `/data` is not writable (a read-only mount, a `--user` without write
+  access), the gateway logs one warning and keeps the totals in memory.
+- Otherwise none: the bare binary keeps the totals in memory.
+
+To keep the totals in memory in an image, set
+`WHISPER_HUB_AUTH_USAGE_DEFAULT_TOTALS_FILE=` (empty). It has to be the
+variable: the image sets it in the environment, which overrides the YAML
+file.
+
+When `auth.usage.totals_file` is set but the file is missing or empty, and
+the default file has content, the totals are moved: the new file is written
+first, then the old one is removed, and one `usage totals moved` line at
+Info names both. A totals file that already has content is used as it is,
+and the old file is left alone. If the move fails, the gateway warns, starts
+anyway and keeps the old file.
+
+The file is a JSON object with the user names as keys:
 
 ```bash
 jq 'map_values(.audio_seconds / 3600)' usage.json    # hours of audio per user

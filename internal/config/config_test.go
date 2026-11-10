@@ -196,6 +196,26 @@ func TestSidecarCompat(t *testing.T) {
 	}
 }
 
+// The images set only the default totals file, through the environment, so
+// a totals_file from the YAML file is never overridden by them.
+func TestImageTotalsDefaultDoesNotOverrideFile(t *testing.T) {
+	file := writeFile(t, "auth: {usage: {totals_file: /mine/usage.json}}\n")
+	image := envOf("WHISPER_HUB_AUTH_USAGE_DEFAULT_TOTALS_FILE", "/data/usage.json")
+	u := load(t, []string{"--config", file}, image).Auth.Usage
+	if u.TotalsFile != "/mine/usage.json" || u.DefaultTotalsFile != "/data/usage.json" {
+		t.Errorf("usage %+v", u)
+	}
+	u = load(t, nil, envOf("WHISPER_HUB_AUTH_USAGE_DEFAULT_TOTALS_FILE", "/data/usage.json", "SIDECAR_ENABLED", "true")).Auth.Usage
+	if u.TotalsFile != "/data/sidecar/usage.json" || u.DefaultTotalsFile != "/data/usage.json" {
+		t.Errorf("sidecar usage %+v", u)
+	}
+	// The documented opt-out: the variable set to the empty string.
+	u = load(t, nil, envOf("WHISPER_HUB_AUTH_USAGE_DEFAULT_TOTALS_FILE", "")).Auth.Usage
+	if u.TotalsFile != "" || u.DefaultTotalsFile != "" {
+		t.Errorf("opt-out usage %+v", u)
+	}
+}
+
 func TestExampleConfigParses(t *testing.T) {
 	_, self, _, _ := runtime.Caller(0)
 	example := filepath.Join(filepath.Dir(self), "..", "..", "deploy", "whisper-hub.example.yaml")
@@ -218,27 +238,28 @@ func TestExampleConfigParses(t *testing.T) {
 // false. Any other setting that renders as zero for an empty configuration
 // is a default its package resolves but YAML does not show.
 var zeroByDefault = map[string]bool{
-	"http.open_listen":           true,
-	"audio.failed_uploads_dir":   true,
-	"hub.default_model":          true, // chosen at run time from the workers
-	"hub.aliases.whisper-1":      true, // "" is the default model
-	"auth.users_file":            true,
-	"auth.trust_forwarded":       true,
-	"auth.anonymous.restrict":    true,
-	"auth.anonymous.models":      true,
-	"auth.wyoming.user":          true,
-	"auth.wyoming.allow_cidrs":   true,
-	"auth.usage.totals_file":     true,
-	"auth.usage.log_file":        true,
-	"auth.usage.log_max_bytes":   true,
-	"legacy.max_upload_bytes":    true,
-	"openai.max_upload_bytes":    true,
-	"wyoming.version":            true, // filled in by the binary with its own version
-	"wyoming.stream_transcripts": true,
-	"wyoming.zeroconf.enabled":   true,
-	"wyoming.zeroconf.host":      true,
-	"worker.command":             true,
-	"worker.engine":              true,
+	"http.open_listen":               true,
+	"audio.failed_uploads_dir":       true,
+	"hub.default_model":              true, // chosen at run time from the workers
+	"hub.aliases.whisper-1":          true, // "" is the default model
+	"auth.users_file":                true,
+	"auth.trust_forwarded":           true,
+	"auth.anonymous.restrict":        true,
+	"auth.anonymous.models":          true,
+	"auth.wyoming.user":              true,
+	"auth.wyoming.allow_cidrs":       true,
+	"auth.usage.totals_file":         true,
+	"auth.usage.default_totals_file": true, // the images set it
+	"auth.usage.log_file":            true,
+	"auth.usage.log_max_bytes":       true,
+	"legacy.max_upload_bytes":        true,
+	"openai.max_upload_bytes":        true,
+	"wyoming.version":                true, // filled in by the binary with its own version
+	"wyoming.stream_transcripts":     true,
+	"wyoming.zeroconf.enabled":       true,
+	"wyoming.zeroconf.host":          true,
+	"worker.command":                 true,
+	"worker.engine":                  true,
 }
 
 // leaves flattens a decoded YAML document into "a.b.c" -> value.
