@@ -132,6 +132,10 @@ type worker struct {
 	limit  int
 	client *workerclient.Client
 	kick   chan struct{}
+	// probeMu serializes probes of this worker (poll loop, Refresh, kicks),
+	// so a slow probe that started earlier cannot overwrite the result of
+	// one that started later.
+	probeMu sync.Mutex
 
 	healthy  bool
 	fails    int
@@ -299,6 +303,8 @@ func (h *Hub) pollLoop(ctx context.Context, w *worker) {
 
 // probe checks one worker and applies the result; it reports health.
 func (h *Hub) probe(ctx context.Context, w *worker) bool {
+	w.probeMu.Lock()
+	defer w.probeMu.Unlock()
 	err := w.client.Health(ctx)
 	var info *workerclient.Info
 	if err == nil {
