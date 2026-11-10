@@ -8,7 +8,7 @@
   "headers": [
     [
       "content-length",
-      "115"
+      "84"
     ],
     [
       "content-type",
@@ -16,17 +16,13 @@
     ],
     [
       "date",
-      "Mon, 09 Nov 2026 22:56:34 GMT"
+      "Tue, 10 Nov 2026 18:58:12 GMT"
     ],
     [
       "server",
       "uvicorn"
-    ],
-    [
-      "x-audio-duration-seconds",
-      "1.428"
     ]
   ],
-  "body": "{\"detected_language\":\"english\",\"language_code\":\"en\",\"confidence\":0.9517726302146912,\"audio_duration_seconds\":1.428}",
-  "body_len": 115
+  "body": "{\"detected_language\":\"english\",\"language_code\":\"en\",\"confidence\":0.9517726302146912}",
+  "body_len": 84
 }

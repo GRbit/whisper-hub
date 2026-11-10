@@ -4,25 +4,25 @@
     "target": "/asr",
     "body_sha256": "d30ec669959261b1377ceb53ae4964f299e843dbb778469db96fef7032df4cfe"
   },
-  "status": 400,
+  "status": 500,
   "headers": [
     [
       "content-length",
-      "53"
+      "21"
     ],
     [
       "content-type",
-      "application/json"
+      "text/plain; charset=utf-8"
     ],
     [
       "date",
-      "Mon, 09 Nov 2026 22:56:30 GMT"
+      "Tue, 10 Nov 2026 18:58:09 GMT"
     ],
     [
       "server",
       "uvicorn"
     ]
   ],
-  "body": "{\"detail\":\"Failed to decode audio (0 bytes, magic=)\"}",
-  "body_len": 53
+  "body": "Internal Server Error",
+  "body_len": 21
 }

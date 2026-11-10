@@ -5,10 +5,11 @@
 // Transcript bodies are not formatted here: the engine worker renders them
 // with the reference code (core.Request.LegacyOutput). Everything around the
 // body (query and form parsing, validation errors, status codes, headers)
-// reproduces the reference service, whose ground truth is captured in
-// testdata/reference. The X-Audio-Duration-Seconds header and the
-// audio_duration_seconds field of /detect-language come from upstream's
-// main branch.
+// reproduces public upstream, whose ground truth is captured in
+// testdata/reference. whisper-hub's own extensions on top of it (the
+// X-Audio-Duration-Seconds header, audio_duration_seconds in
+// /detect-language, JSON details for failures and redacted 400s for audio
+// that does not decode) are listed in reference_test.go.
 package legacy
 
 import (

@@ -4,19 +4,22 @@
 #   static/*.html, assets  Swagger UI pages and bundled files
 #   testdata/reference/cases/*.json  real responses for reference_test.go
 #
-# The reference is upstream's main branch (adds X-Audio-Duration-Seconds)
-# mounted over the app code of a built upstream image, run from /app like the
-# upstream Dockerfile so /assets is served. Nothing is rebuilt.
+# The reference is public upstream whisper-asr-webservice at the commit
+# pinned in deploy/e2e/reference/upstream.env, built with
+# `make image-reference` and run exactly as built (its own app/, from /app
+# so /assets is served). whisper-hub's own extensions to upstream are
+# applied on top of these captures in reference_test.go, not recorded here.
 #
-# Env: REF_REPO (upstream checkout), REF_BRANCH, IMAGE, PORT, MODELS_DIR (cache).
+# Env: REF_IMAGE (default from upstream.env), PORT, MODELS_DIR (model cache).
 # If a container named $NAME is already running it is reused and kept.
 set -euo pipefail
 
 HERE=$(cd "$(dirname "$0")" && pwd)
 PKG=$(cd "$HERE/../.." && pwd)
-REF_REPO=${REF_REPO:-/path/to/whisper-asr-webservice}
-REF_BRANCH=${REF_BRANCH:-main}
-IMAGE=${IMAGE:-whisper-asr-webservice:ec32cd5}
+user_image=${REF_IMAGE:-}
+# shellcheck source=../../../../deploy/e2e/reference/upstream.env
+. "$PKG/../../deploy/e2e/reference/upstream.env"
+IMAGE=${user_image:-$REF_IMAGE}
 PORT=${PORT:-19000}
 NAME=${NAME:-wh-legacy-ref}
 WORK=$(mktemp -d)
@@ -28,11 +31,13 @@ cleanup() {
 	rm -rf "$WORK"
 }
 trap cleanup EXIT
-
-(cd "$REF_REPO" && git archive "$REF_BRANCH" app) | tar -x -C "$WORK"
+if ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
+	echo "capture.sh: reference image $IMAGE not found; build it with: make image-reference" >&2
+	exit 2
+fi
 
 gen() {
-	docker run --rm -w /app -e PYTHONPATH=/app -v "$WORK/app:/app/app:ro" \
+	docker run --rm -w /app -e PYTHONPATH=/app \
 		-v "$HERE/gen_openapi.py:/gen.py:ro" "$@" --entrypoint /app/.venv/bin/python "$IMAGE" /gen.py 2>/dev/null
 }
 gen -e ASR_ENGINE=faster_whisper >"$PKG/static/openapi-faster_whisper.json"
@@ -45,8 +50,8 @@ for f in swagger-ui.css swagger-ui-bundle.js; do
 done
 
 if ! docker ps --format '{{.Names}}' | grep -qx "$NAME"; then
-	docker run -d --name "$NAME" -p "127.0.0.1:$PORT:9000" -w /app \
-		-v "$WORK/app:/app/app:ro" -v "$MODELS_DIR:/models" \
+	docker run -d --name "$NAME" -p "127.0.0.1:$PORT:9000" \
+		-v "$MODELS_DIR:/models" \
 		-e ASR_ENGINE=faster_whisper -e ASR_MODEL=tiny -e ASR_MODEL_PATH=/models -e ASR_QUANTIZATION=int8 \
 		"$IMAGE" >/dev/null
 	started=1

@@ -377,13 +377,94 @@ var ignoredHeaders = map[string]string{
 	"server": "uvicorn identifies itself; Go sends no Server header",
 }
 
-// knownDifferences lists, per case, the deviations from the reference
-// that are accepted, with the reason. Everything else must match. It is
-// empty: every captured case matches except ignoredHeaders.
-//
-// Differences outside these cases, by design or not reproduced:
+// unorderedHeaders hold a set whose order upstream does not fix: Starlette
+// builds Allow from a Python set, so it varies per process. They are
+// compared as sets.
+var unorderedHeaders = map[string]bool{"allow": true}
+
+// The recorded cases are public upstream's responses (capture.sh).
+// whisper-hub deliberately answers some requests differently; each such
+// difference is one entry below, and the expected response of a case is the
+// recorded one with the applicable extensions applied. Nothing else may
+// differ. README "Extensions to upstream" lists the same items.
+
+// refAudioSeconds is the duration of the decoded test recording, as the
+// X-Audio-Duration-Seconds header formats it.
+func refAudioSeconds(t testing.TB) string {
+	return fmt.Sprintf("%.3f", float64(len(rawPCM(t))/2)/core.SampleRate)
+}
+
+// Extension 3 and 4: undecodable or empty uploads get 400 with a redacted
+// reason (size and leading bytes only) instead of upstream's 500 or, for
+// audio without samples, its empty 200. The reasons follow from each
+// case's upload.
+var badAudioDetail = map[string]string{
+	"asr_empty_upload":     "Failed to decode audio (0 bytes, magic=)",
+	"asr_garbage_upload":   "Failed to decode audio (24 bytes, magic=74686973206973206e6f7420)",
+	"asr_two_files":        "Failed to decode audio (6 bytes, magic=78313367320a)",
+	"detect_garbage":       "Failed to decode audio (7 bytes, magic=67617262616765)",
+	"asr_encode_false_odd": "Raw PCM payload has an odd length (3 bytes) (3 bytes, magic=010203)",
+	// Pending the maintainer's decision: upstream answers these with an
+	// empty 200 transcript, whisper-hub with 400.
+	"asr_header_only_wav":    "Audio decoded to 0 samples (44 bytes, magic=524946462400000057415645)",
+	"asr_encode_false_empty": "Audio decoded to 0 samples (0 bytes, magic=)",
+}
+
+// withExtensions returns the response this package must give for a case
+// whose recorded upstream response is want.
+func withExtensions(t testing.TB, c refCase, want capturedResponse) capturedResponse {
+	audioPath := c.method == "POST" && (strings.HasPrefix(c.target, "/asr?") || c.target == "/asr" ||
+		strings.HasPrefix(c.target, "/detect-language"))
+	detect := strings.HasPrefix(c.target, "/detect-language")
+	if detail, ok := badAudioDetail[c.name]; ok {
+		body := string(appendPyJSONString([]byte(`{"detail":`), detail)) + "}"
+		return replaced(want, 400, "application/json", body, "")
+	}
+	if !audioPath || (want.Status != 200 && c.fail == nil) {
+		return want
+	}
+	duration := refAudioSeconds(t)
+	if c.fail != nil {
+		// Extension 2: engine failures get a JSON detail, not Starlette's
+		// plain-text 500, and still report the decoded duration.
+		detail := "Transcription failed"
+		if detect {
+			detail = "Language detection failed"
+		}
+		return replaced(want, 500, "application/json", `{"detail":"`+detail+`"}`, duration)
+	}
+	// Extension 1: the decoded duration, as a header on every response that
+	// decoded the upload, and in the /detect-language JSON body.
+	want.Headers = append(want.Headers, [2]string{"x-audio-duration-seconds", duration})
+	if detect {
+		body := strings.TrimSuffix(want.Body, "}") + `,"audio_duration_seconds":` + duration + "}"
+		return replaced(want, want.Status, "application/json", body, duration)
+	}
+	return want
+}
+
+// replaced is want with a new status and JSON or text body; framing headers
+// follow the body. A non-empty duration adds the duration header.
+func replaced(want capturedResponse, status int, ctype, body, duration string) capturedResponse {
+	out := want
+	out.Status, out.Body, out.BodyLen, out.BodySHA256 = status, body, len(body), ""
+	out.Headers = nil
+	for _, h := range want.Headers {
+		switch h[0] {
+		case "content-type", "content-length", "transfer-encoding", "content-disposition", "asr-engine", "x-audio-duration-seconds":
+			continue
+		}
+		out.Headers = append(out.Headers, h)
+	}
+	out.Headers = append(out.Headers, [2]string{"content-type", ctype}, [2]string{"content-length", fmt.Sprint(len(body))})
+	if duration != "" {
+		out.Headers = append(out.Headers, [2]string{"x-audio-duration-seconds", duration})
+	}
+	return out
+}
+
+// Differences outside the recorded cases, by design or not reproduced:
 //   - header names: uvicorn sends lowercase, Go canonical case; order differs
-//   - Allow "HEAD, GET": upstream iterates a Python set, order varies per process
 //   - Go ServeMux cleans paths ("//asr", "/assets/../x") with a 301; upstream 404s
 //   - multipart charsets other than utf-8 and latin-1 are read as utf-8
 //   - speaker counts beyond the int range saturate instead of staying big ints
@@ -393,7 +474,6 @@ var ignoredHeaders = map[string]string{
 //     Asr-Engine names the engine that ran rather than a configured one
 //   - uvicorn/h11 transport behavior (limits, malformed HTTP, CR/LF in a
 //     header value) is net/http's
-var knownDifferences = map[string]string{}
 
 func TestReference(t *testing.T) {
 	for _, c := range refCases {
@@ -430,16 +510,13 @@ func TestReference(t *testing.T) {
 			srv := httptest.NewServer(mux)
 			defer srv.Close()
 			got := capture(t, c, srv.URL)
-			compareCapture(t, c.name, want, got)
+			compareCapture(t, c.name, withExtensions(t, c, want), got)
 		})
 	}
 }
 
 func compareCapture(t *testing.T, name string, want, got capturedResponse) {
 	t.Helper()
-	if why, ok := knownDifferences[name]; ok {
-		t.Logf("known difference: %s", why)
-	}
 	if got.Status != want.Status {
 		t.Errorf("status = %d, want %d", got.Status, want.Status)
 	}
@@ -451,6 +528,8 @@ func compareCapture(t *testing.T, name string, want, got capturedResponse) {
 	for k, v := range wh {
 		if gv, ok := gh[k]; !ok {
 			t.Errorf("header %s missing, want %q", k, v)
+		} else if unorderedHeaders[k] && sameSet(gv, v) {
+			continue
 		} else if gv != v {
 			t.Errorf("header %s = %q, want %q", k, gv, v)
 		}
@@ -464,6 +543,18 @@ func compareCapture(t *testing.T, name string, want, got capturedResponse) {
 		t.Errorf("body = %q (%d bytes, sha %s)\nwant %q (%d bytes, sha %s)",
 			trunc(got.Body), got.BodyLen, got.BodySHA256, trunc(want.Body), want.BodyLen, want.BodySHA256)
 	}
+}
+
+func sameSet(a, b string) bool {
+	split := func(s string) []string {
+		parts := strings.Split(s, ",")
+		for i := range parts {
+			parts[i] = strings.TrimSpace(parts[i])
+		}
+		sort.Strings(parts)
+		return parts
+	}
+	return strings.Join(split(a), ",") == strings.Join(split(b), ",")
 }
 
 func trunc(s string) string {

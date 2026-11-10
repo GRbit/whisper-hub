@@ -7,9 +7,12 @@ LDFLAGS := -s -w -X main.version=$(VERSION)
 ENGINE  ?= faster_whisper
 ASR_ENGINE ?=
 export ENGINE ASR_ENGINE
+# The legacy reference: public upstream at a pinned commit (REF_URL,
+# REF_COMMIT, REF_IMAGE).
+include deploy/e2e/reference/upstream.env
 
 .PHONY: build fmt vet test test-short check \
-	images image image-gpu image-gateway image-worker image-worker-fake image-e2e \
+	images image image-gpu image-gateway image-worker image-worker-fake image-e2e image-reference \
 	e2e e2e-clients e2e-fake e2e-real e2e-fidelity e2e-packages e2e-engines clean
 
 build:
@@ -54,12 +57,17 @@ image-worker-fake:
 image-e2e:
 	docker build -t whisper-hub-e2e:latest deploy/e2e
 
+# The legacy reference, built from public upstream at the pinned commit,
+# unmodified.
+image-reference:
+	docker build -t $(REF_IMAGE) "$(REF_URL)#$(REF_COMMIT)"
+
 # --- end-to-end checks against real containers (see deploy/e2e) ---
 
 e2e: e2e-clients e2e-fake e2e-real e2e-fidelity
 
-# Owners' real-client scripts (openai SDK, wyoming, HA replay, zeroconf)
-# against the gateway image with a canned Go fake worker.
+# The frontends' real-client checks (openai SDK, wyoming, HA replay,
+# zeroconf) against the gateway image with a canned Go fake worker.
 e2e-clients: image-gateway image-e2e
 	deploy/e2e/clients.sh
 
@@ -73,10 +81,11 @@ e2e-fake: image-gateway image-worker-fake image-e2e
 e2e-real: image image-e2e
 	deploy/e2e/stack.sh real
 
-# Byte-for-byte legacy comparison with the reference image whisper-asr-webservice:ec32cd5
-# running the same engine. openai_whisper is not deterministic upstream:
-# REF_TWICE=1 labels the cases where the reference disagrees with itself.
-e2e-fidelity: image
+# Byte-for-byte legacy comparison with the reference ($(REF_IMAGE), see
+# image-reference) running the same engine; needs VOICE_FILES.
+# openai_whisper is not deterministic upstream: REF_TWICE=1 labels the
+# cases where the reference disagrees with itself.
+e2e-fidelity: image image-reference
 	deploy/e2e/fidelity.sh
 
 # Same package versions in whisper-hub:all as in each single-engine image
@@ -88,7 +97,7 @@ e2e-packages:
 # whisper-hub:all the real-audio run per ASR_ENGINE (and unset) plus
 # e2e-packages. Fidelity can still target :all by hand:
 #   make e2e-fidelity ENGINE=all ASR_ENGINE=whisperx
-e2e-engines: image-e2e
+e2e-engines: image-e2e image-reference
 	for e in faster_whisper openai_whisper whisperx all; do $(MAKE) image ENGINE=$$e || exit 1; done
 	for e in faster_whisper openai_whisper whisperx; do \
 		ENGINE=$$e ASR_ENGINE= deploy/e2e/stack.sh real && ENGINE=$$e ASR_ENGINE= REF_TWICE=$$([ $$e = openai_whisper ] && echo 1) deploy/e2e/fidelity.sh || exit 1; done

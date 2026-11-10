@@ -4,25 +4,33 @@
     "target": "/asr",
     "body_sha256": "a687f7f3e4c2ace49b17d145e31771f069c49332562a0db3941d75f31f89d02a"
   },
-  "status": 400,
+  "status": 200,
   "headers": [
     [
-      "content-length",
-      "82"
+      "asr-engine",
+      "faster_whisper"
+    ],
+    [
+      "content-disposition",
+      "attachment; filename=\"h.wav.txt\""
     ],
     [
       "content-type",
-      "application/json"
+      "text/plain; charset=utf-8"
     ],
     [
       "date",
-      "Mon, 09 Nov 2026 22:56:30 GMT"
+      "Tue, 10 Nov 2026 18:58:09 GMT"
     ],
     [
       "server",
       "uvicorn"
+    ],
+    [
+      "transfer-encoding",
+      "chunked"
     ]
   ],
-  "body": "{\"detail\":\"Audio decoded to 0 samples (44 bytes, magic=524946462400000057415645)\"}",
-  "body_len": 82
+  "body": "",
+  "body_len": 0
 }

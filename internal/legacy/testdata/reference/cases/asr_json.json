@@ -20,7 +20,7 @@
     ],
     [
       "date",
-      "Mon, 09 Nov 2026 22:56:22 GMT"
+      "Tue, 10 Nov 2026 18:58:03 GMT"
     ],
     [
       "server",
@@ -29,10 +29,6 @@
     [
       "transfer-encoding",
       "chunked"
-    ],
-    [
-      "x-audio-duration-seconds",
-      "1.428"
     ]
   ],
   "body": "{\"language\": \"en\", \"segments\": [{\"id\": 1, \"seek\": 0, \"start\": 0.0, \"end\": 1.44, \"text\": \" Front Center.\", \"tokens\": [50364, 17348, 5169, 13, 50436], \"avg_logprob\": -0.8303088943163554, \"compression_ratio\": 0.6190476190476191, \"no_speech_prob\": 0.062248751521110535, \"words\": null, \"temperature\": 0.0}], \"text\": \" Front Center.\"}",
