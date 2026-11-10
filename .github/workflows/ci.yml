@@ -20,8 +20,8 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
       - name: Install ffmpeg (audio and gateway tests decode real files)
@@ -45,10 +45,10 @@ jobs:
         # faster_whisper also checks the copied writer code against the library.
         engine: [fake, faster_whisper]
     steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
       - name: Build test image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: worker
           target: test
@@ -65,15 +65,15 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
       - name: Install ffmpeg (the scripts prepare test audio with it)
         run: sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends ffmpeg
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
       - name: Build gateway image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           file: deploy/Dockerfile.gateway
           tags: whisper-hub-gateway:latest
@@ -81,7 +81,7 @@ jobs:
           cache-from: type=gha,scope=gateway
           cache-to: type=gha,mode=max,scope=gateway
       - name: Build fake worker image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: worker
           build-args: ENGINE=fake
@@ -90,7 +90,7 @@ jobs:
           cache-from: type=gha,scope=worker-fake
           cache-to: type=gha,mode=max,scope=worker-fake
       - name: Build client image (openai SDK, wyoming)
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: deploy/e2e
           tags: whisper-hub-e2e:latest
