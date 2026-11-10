@@ -2,17 +2,22 @@
 
 Engine calls mirror upstream app/asr_models/mbain_whisperx_engine.py
 (whisper-asr-webservice, MIT License) so legacy output matches upstream's.
-WhisperX returns everything at once; cancellation is checked between the
-transcribe, align and diarize stages.
+WhisperX returns everything at once. Pausing is possible only between the
+transcribe, align and diarize stages; cancellation is also checked between
+inference batches of transcribe and between segments of align, through
+hooks that raise JobCancelled (see install_batch_hook and CancelableModel).
 """
 
-import dataclasses
 import collections
+import contextlib
+import dataclasses
 import logging
+import threading
 import typing
 from io import StringIO
 from typing import Any, Tuple
 
+from ..errors import JobCancelled
 from ..model_resolver import resolve_model
 from .base import Done, Engine, JobContext, Options, empty_torch_cache, make_segment, make_word
 
@@ -30,6 +35,106 @@ def _vad_checkpoint_globals() -> list:
         omegaconf.base.Metadata, typing.Any, list, dict, int, collections.defaultdict,
         torch.torch_version.TorchVersion, Introspection, Specifications, Problem, Resolution,
     ]
+
+
+_job = threading.local()
+_warned: set = set()
+
+
+class _Scope:
+    def __init__(self, ctx):
+        self.ctx = ctx
+        self.checks: dict = {}
+
+    def count(self, what: str) -> int:
+        return self.checks.get(what, 0)
+
+    def expect(self, what: str) -> None:
+        """expect warns once per process when a hook of a stage that did run never fired."""
+        if self.count(what) == 0 and what not in _warned:
+            _warned.add(what)
+            logger.warning("whisperx %s cancel hook never ran: this whisperx version calls its model differently, "
+                           "cancellation falls back to stage boundaries", what)
+
+
+@contextlib.contextmanager
+def cancel_scope(ctx):
+    """cancel_scope makes the hooks on this thread check ctx; outside of it they do nothing."""
+    scope = _Scope(ctx)
+    _job.scope = scope
+    try:
+        yield scope
+    finally:
+        _job.scope = None
+
+
+def _check(what: str) -> None:
+    scope = getattr(_job, "scope", None)
+    if scope is None:
+        return
+    scope.checks[what] = scope.count(what) + 1
+    if scope.ctx.cancelled():
+        raise JobCancelled()
+
+
+def install_batch_hook(pipeline) -> bool:
+    """install_batch_hook makes pipeline._forward, which transformers calls once per inference
+    batch, raise JobCancelled for a canceled job first. Only cancellation: the pipeline's tokenizer
+    and options belong to the call in progress, so no other job may run in between. Returns False,
+    with a warning, for a pipeline of an unexpected shape, which keeps cancellation at stage
+    boundaries."""
+    forward = getattr(pipeline, "_forward", None)
+    if not callable(forward):
+        logger.warning("whisperx pipeline has no _forward: cancellation only at stage boundaries")
+        return False
+    if getattr(forward, "_whisper_hub_hook", False):
+        return True
+
+    def hooked(model_inputs, *args, **kwargs):
+        _check("transcribe batch")
+        return forward(model_inputs, *args, **kwargs)
+
+    hooked._whisper_hub_hook = True
+    pipeline._forward = hooked
+    return True
+
+
+def install_vad_hook(pipeline) -> bool:
+    """install_vad_hook does the same for voice activity detection, which runs over the whole
+    file before the first batch: pyannote's Inference calls its infer once per batch of chunks.
+    Returns False, with a warning, when the VAD is not that shape (another VAD method or
+    library version)."""
+    seg = getattr(getattr(getattr(pipeline, "vad_model", None), "vad_pipeline", None), "_segmentation", None)
+    infer = getattr(seg, "infer", None)
+    if not callable(infer):
+        logger.warning("whisperx VAD is not the expected pyannote shape: cancellation during voice activity "
+                       "detection only at stage boundaries")
+        return False
+    if getattr(infer, "_whisper_hub_hook", False):
+        return True
+
+    def hooked(chunks, *args, **kwargs):
+        _check("vad batch")
+        return infer(chunks, *args, **kwargs)
+
+    hooked._whisper_hub_hook = True
+    seg.infer = hooked
+    return True
+
+
+class CancelableModel:
+    """CancelableModel wraps an align model, which whisperx.align calls once per segment, so
+    that a canceled job stops before the next segment. Everything else is delegated."""
+
+    def __init__(self, model):
+        self._model = model
+
+    def __call__(self, *args, **kwargs):
+        _check("align segment")
+        return self._model(*args, **kwargs)
+
+    def __getattr__(self, name):
+        return getattr(self._model, name)
 
 
 def neutral(i: int, seg: dict) -> dict:
@@ -89,6 +194,8 @@ class WhisperXEngine(Engine):
                 compute_type=cfg.quantization,
                 asr_options={"without_timestamps": False},
             )
+        install_batch_hook(handle["whisperx"])
+        install_vad_hook(handle["whisperx"])
         if cfg.hf_token != "":
             from whisperx.diarize import DiarizationPipeline
 
@@ -110,12 +217,15 @@ class WhisperXEngine(Engine):
         if opts.language:
             options_dict["language"] = opts.language
 
+        # Before the options swap below, which must not be seen by another job.
+        ctx.check_cancelled()
         # Upstream passes initial_prompt as a transcribe() kwarg, which this whisperx
         # version rejects with TypeError (HTTP 500). The pipeline takes it through its
         # TranscriptionOptions instead; temperature goes the same way.
-        # Before the options swap below, which must not be seen by another job.
-        ctx.check_cancelled()
         saved_options = pipeline.options
+        # A cancel inside transcribe skips the pipeline's own reset of its tokenizer, which
+        # would otherwise carry this job's language into the next job.
+        saved_tokenizer = getattr(pipeline, "tokenizer", None)
         overrides = {}
         if opts.prompt:
             overrides["initial_prompt"] = opts.prompt
@@ -125,7 +235,15 @@ class WhisperXEngine(Engine):
             pipeline.options = dataclasses.replace(saved_options, **overrides)
         logger.debug("whisperx transcribe: %s overrides=%s", options_dict, sorted(overrides))
         try:
-            result = pipeline.transcribe(audio, **options_dict)
+            with cancel_scope(ctx) as scope:
+                result = pipeline.transcribe(audio, **options_dict)
+            scope.expect("vad batch")
+            if result.get("segments"):
+                scope.expect("transcribe batch")
+        except BaseException:
+            if hasattr(pipeline, "tokenizer"):
+                pipeline.tokenizer = saved_tokenizer
+            raise
         finally:
             pipeline.options = saved_options
         language = result["language"]
@@ -137,7 +255,11 @@ class WhisperXEngine(Engine):
                 language_code=result["language"], device=cfg.device
             )
         model_x, metadata = handle["align_model"][result["language"]]
-        result = whisperx.align(result["segments"], model_x, metadata, audio, cfg.device, return_char_alignments=False)
+        with cancel_scope(ctx) as scope:
+            result = whisperx.align(result["segments"], CancelableModel(model_x), metadata, audio, cfg.device,
+                                    return_char_alignments=False)
+        if result.get("segments"):
+            scope.expect("align segment")
         ctx.check_cancelled()
 
         if opts.diarize and cfg.hf_token != "":

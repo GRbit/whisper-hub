@@ -346,16 +346,36 @@ the gateway goes by the status: 400 and 422 mean `bad_request`, 404
 ## Cancellation
 
 The gateway cancels a job by closing the connection: when its own client
-disconnects, when a streaming consumer fails, or when its shutdown grace
+disconnects, when a streaming consumer fails, when it makes room for a
+higher priority job after `hub.preempt_timeout`, or when its shutdown grace
 period ends. The worker notices the disconnect and stops the job as soon as
-the engine gives control back:
+the engine gives control back, then gives the model to the next job:
 
-| Engine | Stops |
-|---|---|
-| `faster_whisper` | between segments |
-| `openai_whisper` | between 30-second windows |
-| `whisperx` | between its transcribe, align and diarize stages |
-| `fake` | at once |
+| Engine | Stops | Worst measured delay |
+|---|---|---|
+| `faster_whisper` | between segments (at most one 30-second window of decoding) | 0.6 s |
+| `openai_whisper` | between 30-second windows | 1.9 s |
+| `whisperx` | between inference batches of voice activity detection and of transcription, between aligned segments, and between stages; not during diarization | 0.8 s (53.6 s before the batch hooks) |
+| `fake` | at once | |
+
+Measured with `worker/scripts/cancel_check.py`, model `tiny` on the CPU
+images, a 20-minute recording canceled at 8 to 20 points spread over its run,
+and a short job sent right after each cancel. The short job's output was
+identical to a clean run every time, and the long job's uninterrupted output
+was the same before and after the change and after all the cancels, so a
+cancel inside a stage leaves the model usable. Larger models take longer
+per batch, window or segment, and the delays grow with them.
+
+The whisperx hooks only cancel: they raise inside the library's own loops
+(`FasterWhisperPipeline._forward` per batch, pyannote's `Inference.infer`
+per batch of VAD chunks, the align model per segment), and the adapter
+restores the pipeline's tokenizer and options, which a cancel inside
+transcribe would otherwise leave behind. If the library has another shape,
+the adapter logs a warning and cancels at stage boundaries only. Still not
+interruptible: whisperx diarization (one pyannote pipeline call over the
+whole file, only with `HF_TOKEN`; not measured here, as no token was
+available), loading an align model the first time a language needs one,
+and the language detection of the first 30 seconds in every engine.
 
 A job that was still waiting for its model is dropped without running. A
 paused job stops at once.

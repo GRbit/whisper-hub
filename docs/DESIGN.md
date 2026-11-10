@@ -509,9 +509,13 @@ on any worker. A negative `hub.preempt_timeout` disables interruption.
   ends is cut off like a running job.
 
 Pause points per engine, and what was checked, are in
-[worker-api.md](worker-api.md#pausing). A canceled job keeps the engine
-busy until its next pause point, since cancellation is checked at the same
-places; the job that preempted it waits for that in the worker.
+[worker-api.md](worker-api.md#pausing). Cancellation is checked at more
+places than pausing: whisperx also stops between inference batches of voice
+activity detection and transcription and between aligned segments, where
+another job could not safely run but a canceled one can safely stop. So
+after the timeout the engine is free within about a second (measured per
+engine in [worker-api.md](worker-api.md#cancellation)); the job that
+preempted it waits that long in the worker.
 
 Worker health is tracked by probing: `GET /healthz`, then `GET /v1/info`.
 A healthy worker is probed every `hub.poll_interval`. One that is down or
@@ -736,10 +740,16 @@ How this shows in the code:
 - **Preemption is as good as the engine's pause points.** faster_whisper
   pauses within a segment's time, openai_whisper within a 30-second window,
   whisperx only between stages, so on a long file it is usually canceled and
-  restarted, and a canceled job still holds the engine until its next pause
-  point. A job restarted `hub.max_restarts` times is not canceled again,
-  and a streaming job that sent text is never restarted, so a voice command
-  can still wait for a whole file there. A separate worker for interactive use avoids all of it.
+  restarted, which throws its work away. Whisperx diarization cannot be
+  interrupted at all. A job restarted `hub.max_restarts` times is not
+  canceled again, and a streaming job that sent text is never restarted, so
+  a voice command can still wait for a whole file there. A separate worker
+  for interactive use avoids all of it.
+- **The whisperx cancel hooks wrap library internals.** They wrap
+  `FasterWhisperPipeline._forward`, pyannote's `Inference.infer` of the VAD
+  and the align model's call. A whisperx version of another shape loses the
+  hook, not the job: the adapter logs a warning at load, or after a job in
+  which a hook never ran, and cancels at stage boundaries as before.
 - **A paused job keeps its memory.** Its audio and engine state stay in the
   worker, and it can only continue on that worker. A worker that would have
   to unload the paused job's model to run the other one refuses the pause.

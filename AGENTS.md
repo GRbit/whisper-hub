@@ -168,6 +168,9 @@ Worker (Python, `worker/`):
   upstream service on the same raw PCM. `scripts/pause_check.py` - checks on
   a running worker that a paused and resumed job, and a job run during the
   pause, give exactly the output of uninterrupted runs.
+  `scripts/cancel_check.py` - measures how soon a worker frees its model
+  after a cancel at several points of a long job, and checks that the model
+  still gives the same output afterwards.
 
 Deployment:
 
@@ -313,7 +316,12 @@ Go client, the Go fake and `docs/worker-api.md` change together.
   `worker/scripts/pause_check.py` that another job on the same loaded model
   between two such calls leaves both outputs unchanged, and call it only
   where no shared state of the model is half-changed (see the whisperx
-  options swap). Add the engine to the pause table in `docs/worker-api.md`. Register the engine in `engines/__init__.py`
+  options swap). Where the library runs long without returning control,
+  look for a per-batch or per-segment call that a cancel-only hook can
+  wrap (see `engines/whisperx.py`): guard it so an unexpected library shape
+  keeps working without the hook and logs a warning. Measure with
+  `worker/scripts/cancel_check.py`. Add the engine to the pause and cancel
+  tables in `docs/worker-api.md`. Register the engine in `engines/__init__.py`
   (`create` and `cuda_probe`) and in `ENGINES` in `config.py`. Add
   `worker/requirements/<name>.txt` (starting with `-r base.txt`) and the
   name to the `case` statements of the four engine Dockerfiles. On the

@@ -343,8 +343,10 @@ What this means for clients:
 How fast a job pauses depends on the engine: faster_whisper pauses between
 segments, openai_whisper between 30-second windows, whisperx only between
 its transcribe, align and diarize stages, which on a long file usually
-means the timeout path. A job that is canceled keeps the engine busy until
-it reaches the next such point, and the higher job waits that long.
+means the timeout path. A canceled job frees the engine within about a
+second on all three engines (measured with model `tiny` on CPU; larger
+models take proportionally longer per step), except during whisperx
+diarization, which cannot be interrupted.
 
 ## Using the protocols
 
