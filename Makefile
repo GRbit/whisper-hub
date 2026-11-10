@@ -10,7 +10,7 @@ export ENGINE ASR_ENGINE
 
 .PHONY: build fmt vet test test-short check \
 	images image image-gpu image-gateway image-worker image-worker-fake image-e2e \
-	e2e e2e-clients e2e-fake e2e-real e2e-fidelity e2e-engines clean
+	e2e e2e-clients e2e-fake e2e-real e2e-fidelity e2e-packages e2e-engines clean
 
 build:
 	$(GO) build -ldflags '$(LDFLAGS)' -o bin/whisper-hub ./cmd/whisper-hub
@@ -79,14 +79,21 @@ e2e-real: image image-e2e
 e2e-fidelity: image
 	deploy/e2e/fidelity.sh
 
-# e2e-real and e2e-fidelity for every engine image, then whisper-hub:all with
-# each ASR_ENGINE and with it unset.
+# Same package versions in whisper-hub:all as in each single-engine image
+# (same worker code too), so :all needs no fidelity run of its own.
+e2e-packages:
+	deploy/e2e/packages.sh
+
+# e2e-real and e2e-fidelity for every single-engine image; for
+# whisper-hub:all the real-audio run per ASR_ENGINE (and unset) plus
+# e2e-packages. Fidelity can still target :all by hand:
+#   make e2e-fidelity ENGINE=all ASR_ENGINE=whisperx
 e2e-engines: image-e2e
 	for e in faster_whisper openai_whisper whisperx all; do $(MAKE) image ENGINE=$$e || exit 1; done
 	for e in faster_whisper openai_whisper whisperx; do \
 		ENGINE=$$e ASR_ENGINE= deploy/e2e/stack.sh real && ENGINE=$$e ASR_ENGINE= REF_TWICE=$$([ $$e = openai_whisper ] && echo 1) deploy/e2e/fidelity.sh || exit 1; done
-	for a in "" faster_whisper openai_whisper whisperx; do \
-		ENGINE=all ASR_ENGINE=$$a deploy/e2e/stack.sh real && ENGINE=all ASR_ENGINE=$$a REF_TWICE=1 deploy/e2e/fidelity.sh || exit 1; done
+	for a in "" faster_whisper openai_whisper whisperx; do ENGINE=all ASR_ENGINE=$$a deploy/e2e/stack.sh real || exit 1; done
+	deploy/e2e/packages.sh
 
 clean:
 	rm -rf bin
