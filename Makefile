@@ -1,12 +1,16 @@
 GO      ?= go
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -s -w -X main.version=$(VERSION)
-# Engine of the all-in-one and worker images.
+# Engine of the all-in-one and worker images: faster_whisper, whisperx,
+# openai_whisper, or all (all-in-one only). ASR_ENGINE, when set, is passed
+# to the all-in-one container in the e2e runs (meaningful for ENGINE=all).
 ENGINE  ?= faster_whisper
+ASR_ENGINE ?=
+export ENGINE ASR_ENGINE
 
 .PHONY: build fmt vet test test-short check \
 	images image image-gpu image-gateway image-worker image-worker-fake image-e2e \
-	e2e e2e-clients e2e-fake e2e-real e2e-fidelity clean
+	e2e e2e-clients e2e-fake e2e-real e2e-fidelity e2e-engines clean
 
 build:
 	$(GO) build -ldflags '$(LDFLAGS)' -o bin/whisper-hub ./cmd/whisper-hub
@@ -34,7 +38,7 @@ images: image image-gateway
 image:
 	docker build -f deploy/Dockerfile --build-arg ENGINE=$(ENGINE) --build-arg VERSION=$(VERSION) -t whisper-hub:$(ENGINE) .
 
-# CUDA all-in-one. Not tested here (no GPU on the build machine).
+# CUDA all-in-one (whisper-hub:<engine>-gpu); CI builds these.
 image-gpu:
 	docker build -f deploy/Dockerfile.gpu --build-arg ENGINE=$(ENGINE) --build-arg VERSION=$(VERSION) -t whisper-hub:$(ENGINE)-gpu .
 
@@ -64,14 +68,25 @@ e2e-clients: image-gateway image-e2e
 e2e-fake: image-gateway image-worker-fake image-e2e
 	deploy/e2e/stack.sh fake
 
-# All-in-one faster_whisper with model tiny on real audio, and the
+# All-in-one whisper-hub:$(ENGINE) with model tiny on real audio, and the
 # sidecar compatibility mode.
 e2e-real: image image-e2e
 	deploy/e2e/stack.sh real
 
-# Byte-for-byte legacy comparison with the reference image whisper-asr-webservice:ec32cd5.
+# Byte-for-byte legacy comparison with the reference image whisper-asr-webservice:ec32cd5
+# running the same engine. openai_whisper is not deterministic upstream:
+# REF_TWICE=1 labels the cases where the reference disagrees with itself.
 e2e-fidelity: image
 	deploy/e2e/fidelity.sh
+
+# e2e-real and e2e-fidelity for every engine image, then whisper-hub:all with
+# each ASR_ENGINE and with it unset.
+e2e-engines: image-e2e
+	for e in faster_whisper openai_whisper whisperx all; do $(MAKE) image ENGINE=$$e || exit 1; done
+	for e in faster_whisper openai_whisper whisperx; do \
+		ENGINE=$$e ASR_ENGINE= deploy/e2e/stack.sh real && ENGINE=$$e ASR_ENGINE= REF_TWICE=$$([ $$e = openai_whisper ] && echo 1) deploy/e2e/fidelity.sh || exit 1; done
+	for a in "" faster_whisper openai_whisper whisperx; do \
+		ENGINE=all ASR_ENGINE=$$a deploy/e2e/stack.sh real && ENGINE=all ASR_ENGINE=$$a REF_TWICE=1 deploy/e2e/fidelity.sh || exit 1; done
 
 clean:
 	rm -rf bin

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"math"
 	"os"
 	"os/exec"
@@ -17,6 +18,24 @@ import (
 )
 
 const testFiles = "/path/to/voice-test-files"
+
+// voiceFile returns a recording from testFiles, or, where those are not
+// available (CI), a generated 44.1 kHz stereo tone of the same length, which
+// exercises the same decoder paths.
+func voiceFile(t *testing.T, name string, seconds float64) string {
+	t.Helper()
+	p := filepath.Join(testFiles, name)
+	if _, err := os.Stat(p); err == nil {
+		return p
+	}
+	p = filepath.Join(t.TempDir(), name)
+	out, err := exec.Command("ffmpeg", "-v", "error", "-f", "lavfi", "-i",
+		fmt.Sprintf("sine=frequency=440:sample_rate=44100:duration=%g", seconds), "-ac", "2", p).CombinedOutput()
+	if err != nil {
+		t.Fatalf("generate %s: %v %s", name, err, out)
+	}
+	return p
+}
 
 func needFFmpeg(t *testing.T) {
 	t.Helper()
@@ -49,9 +68,9 @@ func TestDecodeWAV(t *testing.T) {
 	needFFmpeg(t)
 	spool := t.TempDir()
 	d := New(Config{SpoolDir: spool}, nil)
-	f, err := os.Open(filepath.Join(testFiles, "english-front-center.wav"))
+	f, err := os.Open(voiceFile(t, "english-front-center.wav", 1.428))
 	if err != nil {
-		t.Skip(err)
+		t.Fatal(err)
 	}
 	defer f.Close()
 	pcm, err := d.DecodeFile(context.Background(), f)
@@ -71,10 +90,7 @@ func TestDecodeWAV(t *testing.T) {
 // that first, then shows DecodeFile handles the same bytes.
 func TestDecodeTrailingMoovM4A(t *testing.T) {
 	needFFmpeg(t)
-	src := filepath.Join(testFiles, "german-20s.wav")
-	if _, err := os.Stat(src); err != nil {
-		t.Skip(err)
-	}
+	src := voiceFile(t, "german-20s.wav", 20)
 	m4a := filepath.Join(t.TempDir(), "t.m4a")
 	if out, err := exec.Command("ffmpeg", "-v", "error", "-y", "-i", src, "-c:a", "aac", "-b:a", "128k", m4a).CombinedOutput(); err != nil {
 		t.Fatalf("ffmpeg encode: %v %s", err, out)

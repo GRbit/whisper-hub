@@ -2,8 +2,9 @@
 # End-to-end runs against real containers (see stack_check.py):
 #   deploy/e2e/stack.sh fake   gateway image + Python fake worker image: protocols,
 #                              streaming, cancellation, priority (usage log), auth on and off
-#   deploy/e2e/stack.sh real   all-in-one faster_whisper image, model tiny on CPU, real audio,
-#                              plus the sidecar compatibility mode (SIDECAR_*)
+#   deploy/e2e/stack.sh real   all-in-one image, model tiny on CPU, real audio, plus the
+#                              sidecar compatibility mode (SIDECAR_*). ENGINE picks the
+#                              image (whisper-hub:$ENGINE), ASR_ENGINE is passed to it if set.
 # Images: GATEWAY_IMAGE, WORKER_IMAGE, AIO_IMAGE, E2E_IMAGE (built by make).
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
@@ -11,7 +12,9 @@ root="$(cd "$here/../.." && pwd)"
 mode="${1:?usage: stack.sh fake|real}"
 gateway_image="${GATEWAY_IMAGE:-whisper-hub-gateway:latest}"
 worker_image="${WORKER_IMAGE:-whisper-hub-worker:fake}"
-aio_image="${AIO_IMAGE:-whisper-hub:faster_whisper}"
+aio_image="${AIO_IMAGE:-whisper-hub:${ENGINE:-faster_whisper}}"
+aio_env=(-e ASR_MODEL=tiny)
+[ -n "${ASR_ENGINE:-}" ] && aio_env+=(-e "ASR_ENGINE=$ASR_ENGINE")
 e2e_image="${E2E_IMAGE:-whisper-hub-e2e:latest}"
 cache_volume="${CACHE_VOLUME:-whub-e2e-cache}"
 voice="${VOICE_FILES:-/path/to/voice-test-files}"
@@ -28,7 +31,17 @@ docker network create "$net" >/dev/null
 
 mkdir -p "$work/audio" "$work/data"
 chmod 777 "$work/data"
-cp "$voice/english-front-center.wav" "$voice/german-20s.wav" "$work/audio/"
+if [ -f "$voice/english-front-center.wav" ]; then
+	cp "$voice/english-front-center.wav" "$voice/german-20s.wav" "$work/audio/"
+elif [ "$mode" = fake ]; then
+	# CI has no recordings; the fake engine ignores the content anyway.
+	voice="$work/audio"
+	ffmpeg -v error -f lavfi -i "sine=frequency=440:sample_rate=44100:duration=1.428" -ac 2 "$voice/english-front-center.wav"
+	ffmpeg -v error -f lavfi -i "sine=frequency=440:sample_rate=44100:duration=20" -ac 2 "$voice/german-20s.wav"
+else
+	echo "real mode needs the recordings in VOICE_FILES ($voice)" >&2
+	exit 2
+fi
 ffmpeg -v error -i "$voice/english-front-center.wav" -f s16le -ac 1 -ar 16000 "$work/audio/english-front-center.pcm"
 # ffmpeg's default MP4 layout puts the moov atom last, as Android MediaMuxer does.
 ffmpeg -v error -i "$voice/german-20s.wav" -c:a aac -b:a 96k "$work/audio/german-trailing-moov.m4a"
@@ -99,9 +112,11 @@ try: urllib.request.urlopen(urllib.request.Request('http://whub-s-gw-auth:9000/a
 except urllib.error.HTTPError as e: print(e.code)")
 	[ "$code" = 401 ] && echo "ok   legacy without credentials -> 401" || { echo "FAIL legacy without credentials -> $code"; status=1; }
 else
-	docker run -d --name whub-s-aio --network "$net" -v "$cache_volume:/root/.cache" -e ASR_MODEL=tiny "$aio_image" >/dev/null
+	docker run -d --name whub-s-aio --network "$net" -v "$cache_volume:/root/.cache" "${aio_env[@]}" "$aio_image" >/dev/null
 	wait_healthy whub-s-aio 9000
-	echo "== all-in-one faster_whisper, model tiny"
+	# The engine actually running, from the gateway's "worker up" line.
+	running="$(docker logs whub-s-aio 2>&1 | grep 'msg="worker up"' | grep -o 'engine=[a-z_]*' | head -1)"
+	echo "== all-in-one $aio_image ${ASR_ENGINE:+ASR_ENGINE=$ASR_ENGINE }-> $running, model tiny"
 	check --mode real --http http://whub-s-aio:9000 --wyoming whub-s-aio:10300 || status=1
 	docker rm -f whub-s-aio >/dev/null
 
@@ -110,7 +125,7 @@ else
 	printf 'users:\n  - name: alice\n    password_hash: "%s"\n' "$pw_hash" >"$work/auth.yaml"
 	chmod 644 "$work/auth.yaml"
 	docker run -d --name whub-s-aio-proxy --network "$net" -v "$cache_volume:/root/.cache" -v "$work/auth.yaml:/config/auth.yaml:ro" \
-		-v "$work/data:/data/sidecar" -e ASR_MODEL=tiny -e SIDECAR_ENABLED=true -e SIDECAR_SNAPSHOT_INTERVAL=1s "$aio_image" >/dev/null
+		-v "$work/data:/data/sidecar" "${aio_env[@]}" -e SIDECAR_ENABLED=true -e SIDECAR_SNAPSHOT_INTERVAL=1s "$aio_image" >/dev/null
 	wait_healthy whub-s-aio-proxy 9001
 	echo "== sidecar compatibility: Basic auth on 9001"
 	check --mode real --http http://whub-s-aio-proxy:9001 --wyoming whub-s-aio-proxy:10300 --basic alice:e2e-secret --only legacy || status=1

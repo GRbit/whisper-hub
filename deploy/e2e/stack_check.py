@@ -12,6 +12,7 @@ import asyncio
 import base64
 import http.client
 import json
+import re
 import socket
 import sys
 import threading
@@ -68,6 +69,13 @@ def post(t, path, filename, data, headers=None, timeout=600):
     return out
 
 
+def whisperd_text(body):
+    # As whisperd's WhisperClient.kt: "text", else the joined segment texts
+    # (whisperx's JSON output, as upstream's, has no top-level text).
+    d = json.loads(body)
+    return d.get("text", "").strip() or "".join(seg.get("text", "") for seg in d.get("segments", []))
+
+
 def legacy(t, mode, audio, wav_name):
     want = FAKE_TEXT if mode == "fake" else "front center"
     norm = lambda s: s.lower().replace(",", "").replace(".", "")  # noqa: E731
@@ -82,7 +90,7 @@ def legacy(t, mode, audio, wav_name):
         check(f"telegram/whisper-go-ui shape ({label})", st == 200 and norm(want) in norm(b.decode()), (st, b[:200]))
     # whisperd: output=json, reads "text".
     st, _, b = post(t, "/asr?task=transcribe&output=json&encode=true", "rec.wav", audio, {"Accept": "application/json"})
-    text = json.loads(b).get("text", "") if st == 200 else ""
+    text = whisperd_text(b) if st == 200 else ""
     check("whisperd shape (output=json text)", norm(want) in norm(text), (st, b[:200]))
     st, _, b = post(t, "/detect-language", wav_name, audio)
     d = json.loads(b) if st == 200 else {}
@@ -100,7 +108,9 @@ def sdk(t, mode, path):
                                       timestamp_granularities=["word", "segment"])
     check("sdk verbose_json words", r.words and r.segments and r.language == "english", r)
     r = c.audio.transcriptions.create(model="whisper-1", file=f(), response_format="srt")
-    check("sdk srt", r.startswith("1\n00:00:00,000 --> "), r[:80])
+    # Structure, not an exact time: whisperx aligns the first cue to the
+    # first word (e.g. 00:00:00,031), the other engines start at 0.
+    check("sdk srt", re.match(r"1\n\d\d:\d\d:\d\d,\d{3} --> \d\d:\d\d:\d\d,\d{3}\n\S", r) is not None, r[:80])
     r = c.audio.translations.create(model="whisper-1", file=f())
     check("sdk translation", bool(r.text.strip()), r.text)
     ids = [m.id for m in c.models.list().data]
@@ -226,7 +236,7 @@ def main():
         legacy(t, a.mode, wav, "english-front-center.wav")
         m4a = open("/audio/german-trailing-moov.m4a", "rb").read()
         st, _, b = post(t, "/asr?task=transcribe&output=json&encode=true", "rec.m4a", m4a)
-        text = json.loads(b).get("text", "") if st == 200 else ""
+        text = whisperd_text(b) if st == 200 else ""
         check("m4a with trailing moov (MediaMuxer layout)", st == 200 and len(text.split()) >= (3 if a.mode == "real" else 1),
               (st, b[:200]))
         if a.mode == "real":
