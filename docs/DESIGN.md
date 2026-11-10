@@ -1,255 +1,674 @@
 # whisper-hub design
 
-One speech-to-text service that speaks three client protocols at once:
+This document describes how whisper-hub is built and why. It is for people
+who want to understand or change the code. How to run the service is in the
+[README](../README.md); the working rules for contributors and coding agents
+are in [AGENTS.md](../AGENTS.md).
 
-1. **Legacy**: the HTTP API of `ahmetoner/whisper-asr-webservice` (`/asr`,
-   `/detect-language`, `/docs`), 100% compatible. Existing clients and
-   deployments (same port, same env vars) must keep working unchanged.
-2. **OpenAI**: `/v1/audio/transcriptions`, `/v1/audio/translations`,
-   `/v1/models`. Compatible at the level of `whisper-1`; full parity with
-   the gpt-* transcription models is a non-goal, and so is the Realtime API.
-3. **Wyoming**: TCP protocol used by Home Assistant (default port 10300).
+## Goals and non-goals
 
-Plus authentication, per-user model access and usage logging built in.
+whisper-hub is one speech-to-text service that speaks three client protocols
+at once:
+
+1. **Legacy**: the HTTP API of
+   [whisper-asr-webservice](https://github.com/ahmetoner/whisper-asr-webservice)
+   (`/asr`, `/detect-language`, `/docs`). The goal is full compatibility:
+   an existing deployment (same port, same environment variables, same
+   flags, same model cache) and its clients keep working when the image is
+   swapped, and responses are identical byte for byte.
+2. **OpenAI**: `/v1/audio/transcriptions`, `/v1/audio/translations` and
+   `/v1/models`, compatible at the level of OpenAI's `whisper-1` model, so
+   that official SDKs work unchanged.
+3. **Wyoming**: the TCP protocol Home Assistant uses for voice pipelines.
+
+On top of that it provides authentication, per-user model access and usage
+accounting, which whisper-asr-webservice does not have.
+
+Non-goals:
+
+- Parity with OpenAI's `gpt-*` transcription models (diarized output, log
+  probabilities, server-side chunking) and the OpenAI Realtime API.
+- Decoding or resampling audio in the workers.
+- Preempting a running job, a persistent job queue, or sharing state between
+  several gateway processes.
+- Platforms other than linux/amd64 containers.
+
+## Terms
+
+| Term | Meaning |
+|---|---|
+| upstream | whisper-asr-webservice, the service whose API the legacy protocol reproduces |
+| reference | the exact build of upstream that whisper-hub is compared with byte for byte, see [Legacy compatibility](#legacy-compatibility) |
+| sidecar | an authentication proxy that earlier deployments ran in front of upstream. whisper-hub replaces it and accepts its settings, users file and usage files |
+| engine | a speech recognition library: `faster_whisper`, `whisperx`, `openai_whisper`, or the model-free `fake` used in tests |
+| worker | a Python process that runs one engine and serves one or more models over the internal [worker API](worker-api.md) |
+| gateway | the Go binary `whisper-hub`: everything except running models |
+| frontend | one of the three protocol implementations inside the gateway |
+| hub | the part of the gateway behind the frontends: worker registry, model resolution, scheduling |
+| job | one transcription or language detection handed to the hub |
+| model id | the name a worker reports for a model, for example `base` or `large-v3` |
+| alias | an extra public name for a model id, for example `whisper-1` |
 
 ## Architecture
 
 ```
 clients --> gateway (Go, one static binary)            --> engine worker(s) (Python)
             :9000  HTTP  legacy + OpenAI + /healthz         :9100 internal HTTP
-            :10300 TCP   Wyoming                            faster-whisper | whisperx |
-            auth, model ACL, usage log                      openai-whisper | fake
+            :10300 TCP   Wyoming                            faster_whisper | whisperx |
+            auth, model access, usage accounting            openai_whisper | fake
             ffmpeg decode -> PCM s16le 16 kHz mono
-            priority queue per worker
+            one priority queue for all workers
 ```
 
-- The gateway owns everything protocol-shaped. Workers only run models.
-- Audio is decoded once, in the gateway. Workers receive raw PCM and need
-  no ffmpeg. This also gives the gateway the audio duration for accounting.
-- A worker serves one engine and one or more models. Several workers can be
-  attached (for example faster-whisper and whisperx in separate containers).
-- Shipping: an all-in-one image per engine (`deploy/Dockerfile`, gateway +
-  worker, drop-in replacement for the upstream image), `whisper-hub:all`
-  with every engine installed (`ENGINE=all`, `ASR_ENGINE` picks one per
-  container start, unset means `openai_whisper` as upstream), a gateway-only image
-  (`deploy/Dockerfile.gateway`), worker images (`worker/Dockerfile`), and
-  compose files for both setups. Both Go images ship upstream's ffmpeg build
-  (`onerahmet/ffmpeg:n7.1`), so uploads decode to the same PCM as upstream.
-- Supervision in the all-in-one image: the gateway is PID 1 and starts the
-  worker as its child (`internal/workerproc`, configured by `worker.command`).
-  Signals reach the process that knows the shutdown order (drain HTTP and
-  Wyoming, then stop the worker); the gateway exits when the worker dies,
-  so the container restarts. On a single-engine image `ASR_ENGINE` unset
-  means the image's engine and a different one fails at startup naming the
-  image that has it.
-- CI (`.github/workflows`): `ci.yml` (Go checks, worker pytest, fake-engine
-  end-to-end runs) and `images.yml` (every image including the CUDA ones,
-  pushed to ghcr.io/grbit on master and v* tags, layer cache on ghcr.io).
+The system is split into two kinds of process, and the split follows what
+each language is needed for:
 
-## Repository layout and ownership
+- **The gateway owns everything protocol-shaped.** Parsing three protocols,
+  authentication, access rules, queueing and accounting are plain network
+  code with no dependency on a machine learning library. In Go this is one
+  static binary of a few megabytes that starts instantly.
+- **Workers only run models.** The engines are Python libraries with heavy
+  dependencies (CTranslate2, torch). A worker is a thin HTTP shell around
+  one engine and knows nothing about clients, users or protocols.
 
-| Path | Owner | Contents |
-|------|-------|----------|
-| `internal/core/` | lead (frozen) | Shared contracts. Do not edit; report what you need changed |
-| `internal/legacy/` | legacy | `/asr`, `/detect-language`, `/`, `/docs`, `/openapi.json` |
-| `internal/openaiapi/` | openai | `/v1/audio/*`, `/v1/models` |
-| `internal/wyoming/` | wyoming | Wyoming codec and TCP server |
-| `internal/auth/` | auth | users, HTTP auth middleware, model ACL, usage accounting, request log |
-| `internal/hub/` | runtime | `core.Service` impl: worker registry, model resolution, scheduler, usage; the Worker API client is internal to it (`internal/hub/internal/workerclient`), the fake worker for tests is `internal/hub/workertest` |
-| `internal/audio/` | runtime | `core.AudioDecoder`: ffmpeg for files, pure Go PCM conversion |
-| `internal/config/` | integration | the whole configuration: YAML file, `WHISPER_HUB_*` env, upstream and sidecar variables, flags |
-| `internal/workerproc/` | integration | the worker child process of the all-in-one image |
-| `worker/` | worker | Python engine worker, its Dockerfiles and tests |
-| `cmd/whisper-hub/` | integration | the binary: composes the modules (`serve`), `hash`, `apikey`, `config`, `healthcheck` |
-| `deploy/` | integration | Dockerfiles, compose files, example config, users file template, end-to-end scripts (`deploy/e2e`) |
+Consequences of the split:
 
-Each owner works in its own git worktree and edits only its own paths.
-`go.mod`/`go.sum` may be changed locally to add dependencies; list the
-additions in the final report so they can be merged.
+- **Audio is decoded once, in the gateway.** Every frontend turns its input
+  into the same thing: mono 16 kHz signed 16-bit PCM. Workers receive that
+  PCM and need no ffmpeg. The gateway also knows the audio duration before
+  any model runs, which is what usage accounting needs.
+- **Several workers can be attached.** A worker serves one engine and one or
+  more models. Different engines, or several copies of one model, are just
+  more entries in `hub.workers`.
+- **Adding a protocol or an engine touches one side only.** A new frontend
+  is written against the Go contracts in `internal/core`; a new engine is a
+  Python class behind the worker API.
+- **The cost is a second process and an internal API** to keep in sync on
+  both sides. The all-in-one image hides the second process from users, see
+  [Images and process supervision](#images-and-process-supervision).
 
-## Go package rules
+## Modules and their interfaces
 
-- Depend on `internal/core` only (plus stdlib and a minimal set of third
-  party modules). Frontends never import each other, the runtime or auth.
-  Only the composition layer (`cmd/whisper-hub`, `internal/config`) imports
-  the modules themselves; `main` composes and holds no logic.
-- Export a `Config` struct with `yaml` tags and documented defaults, and a
-  constructor taking that config plus `core` interfaces. Do not read
-  environment variables or files for configuration inside the package; the
-  integration phase composes the root config.
-- HTTP frontends expose `func (*T) Register(mux *http.ServeMux)` (Go 1.22+
-  method patterns) or an `http.Handler`. They read the caller with
-  `core.IdentityFrom(ctx)`; they do not authenticate.
-- Frontends pass `Request.Model` as received. Alias resolution, ACL, queueing
-  and usage records all happen inside `core.Service`.
-- Map `core.Error` kinds to protocol errors; never leak `Error.Err` text.
-- Test against a fake `core.Service` written in your own `_test.go` files.
+### Gateway packages
 
-## Design principles: deep modules
+| Package | What it is | Interface (what callers use) |
+|---|---|---|
+| `internal/core` | the contracts every other package shares | types `Request`, `Result`, `Segment`, `Model`, `Identity`, `Error`, `UsageEvent`; interfaces `Service`, `AudioDecoder`, `Authorizer`, `UsageRecorder` |
+| `internal/legacy` | legacy frontend | `New(cfg, service, decoder)`, `Register(mux)` |
+| `internal/openaiapi` | OpenAI frontend | `New(cfg, service, decoder, log)`, `Register(mux)`, `WriteError` (so the auth middleware can answer in OpenAI's error shape) |
+| `internal/wyoming` | Wyoming frontend: codec, TCP server, zeroconf announcement | `New(cfg, service, decoder, identify, log)`, `Serve(ctx, listener)` |
+| `internal/auth` | users file, HTTP authentication, model access rules, usage accounting | `New(cfg, rejecters)`, `Middleware`, `WyomingIdentity`, `UsageHandler`, `Reload`, `Run`, `Close`; it is the `core.Authorizer` and `core.UsageRecorder` |
+| `internal/hub` | the `core.Service` implementation: worker health, model resolution, scheduling | `New(cfg, authorizer, recorder, log)`, the `core.Service` methods, `HealthHandler`, `Close` |
+| `internal/hub/internal/workerclient` | HTTP client of the worker API, private to the hub | used by `internal/hub` only |
+| `internal/hub/workertest` | an in-process fake worker for tests | `New`, scripted responses, recorded jobs |
+| `internal/audio` | the `core.AudioDecoder` implementation: ffmpeg for files, pure Go conversion for raw PCM | `New(cfg, log)`, `Check`, `DecodeFile`, `FromRaw` |
+| `internal/config` | the whole configuration: defaults, YAML file, environment, flags, upstream and sidecar variables | `Load(args, getenv, out)`, `Config` |
+| `internal/workerproc` | the worker as a child process of the gateway | `Start(cfg, env, log)`, `Proc.Done`, `Proc.Stop`, `Config.Env` |
+| `cmd/whisper-hub` | the binary: builds the modules, wires them together, handles signals | the command line |
 
-Vocabulary and rules follow the `codebase-design` skill. Use the terms
-module, interface, seam, adapter, depth, leverage, locality.
+### The core contracts
 
-- Build deep modules: a lot of behavior behind a small interface. Before
-  adding an exported identifier ask whether it can stay inside. The
-  interface is everything a caller must know: signatures, but also
-  invariants, ordering, error modes and required config. Keep all of it small.
-- The deletion test: if deleting a module only moves its code into the one
-  caller, it was a pass-through; merge it. Do not split a package into
-  helpers that have a single caller and no behavior of their own.
-- The interface is the test surface. Test through the exported interface
-  and assert on observable outcomes, so tests survive internal refactors.
-  Wanting to test past the interface means the module has the wrong shape.
-  Do not export something only because a test wants it.
-- One adapter is a hypothetical seam, two is a real one. Introduce a Go
-  interface only where something really varies (production plus a test
-  stand-in counts). No single-implementation interfaces "for flexibility".
-- Internal seams stay internal: a module may be composed of swappable parts,
-  but they are not part of its interface.
-- Accept dependencies, do not create them; return results rather than
-  mutate arguments.
-- Dependencies by category: in-process logic is tested directly; ffmpeg and
-  the filesystem are local-substitutable, test with the real thing; the
-  engine worker is remote but owned, so it sits behind a port
-  (`core.Service` for frontends, the worker HTTP API for the hub) with an
-  in-memory or httptest adapter for tests.
+`core.Service` is the single entry point a frontend uses:
+
+```go
+type Service interface {
+    Transcribe(ctx context.Context, req *Request, onSegment func(Segment) error) (*Result, error)
+    DetectLanguage(ctx context.Context, req *DetectRequest) (*Detection, error)
+    Models(ctx context.Context) []Model
+}
+```
+
+Its interface is more than these signatures. A frontend may rely on the
+following, and must not repeat any of it:
+
+- The caller's identity travels in `ctx` (`core.IdentityFrom`). A context
+  without one is the anonymous caller.
+- `Request.Model` is passed exactly as the client sent it. The service
+  resolves aliases, applies the unknown-model policy and enforces access.
+- The service queues the job by `Request.Priority` and records usage, for
+  failed jobs too.
+- `onSegment`, when given, is called for each segment as soon as the engine
+  produces it. An error returned from it cancels the job.
+- Canceling `ctx` cancels the job, whether it is queued or running.
+- Every error is a `*core.Error` with a kind (`bad_request`, `bad_audio`,
+  `unauthenticated`, `forbidden`, `model_not_found`, `unavailable`,
+  `canceled`, `internal`) and a message that is safe to show to a client.
+  The underlying cause is for the log only.
+- `Models` lists only what the caller may use, default model first.
+
+`core.AudioDecoder` turns client audio into PCM: `DecodeFile` for anything
+ffmpeg understands, `FromRaw` for headerless PCM of any rate, sample width
+and channel count.
+
+`core.Authorizer` (`AllowModel`) and `core.UsageRecorder` (`Record`) are what
+the hub needs from authentication. Both are implemented by `auth.Auth`; the
+hub accepts `nil` for either.
+
+### Dependency rules
+
+- A frontend imports `internal/core` and nothing else from this repository.
+  Frontends do not know about each other, the hub, authentication or
+  configuration files.
+- `internal/hub`, `internal/auth` and `internal/audio` also import only
+  `internal/core`.
+- Each package exports a `Config` struct with `yaml` tags whose zero values
+  mean "the default", and a constructor that takes this config plus the core
+  interfaces it needs. No package reads environment variables or
+  configuration files itself.
+- Only `internal/config` (which assembles the packages' `Config` structs
+  into one) and `cmd/whisper-hub` (which constructs and connects the
+  modules) import the other packages. `main` composes and holds no logic.
+- HTTP frontends do not authenticate. They read the caller that
+  `auth.Middleware` put into the request context.
+
+### The worker
+
+The worker (`worker/whisper_worker/`) mirrors the same idea in Python:
+
+| Module | What it is |
+|---|---|
+| `app.py` | the worker API as a plain ASGI application; watches for client disconnects while streaming |
+| `config.py` | configuration from environment variables; upstream's variables keep upstream's meaning |
+| `models.py` | model lifecycle (lazy loading, eviction, idle unloading) and one job at a time per model |
+| `engines/base.py` | the `Engine` interface (`load`, `unload`, `transcribe`, `detect_language`, `capabilities`) and the engine-neutral segment shape |
+| `engines/*.py` | one adapter per engine |
+| `legacy_writers.py` | the output writers upstream uses for faster_whisper, copied so that output is identical |
+| `model_resolver.py` | Hugging Face URLs as model names |
+
+### Worker API
+
+The interface between gateway and worker is a small internal HTTP API,
+specified in full in [worker-api.md](worker-api.md). Its shape follows from
+what the gateway needs:
+
+- A job is one multipart request: a JSON part with engine-neutral options
+  and a part with the raw PCM. The worker never sees a client's file.
+- The transcript comes back as a stream of JSON lines, one per segment as
+  the engine produces it, so that streaming clients get text early and the
+  gateway can tell a working engine from a stuck one.
+- The gateway cancels a job by closing the connection. No job ids or cancel
+  calls are needed.
+- A worker describes itself (`GET /v1/info`: engine, models, optional
+  features), so the gateway needs no per-worker configuration beyond a URL.
+- The API is unauthenticated and unversioned: gateway and worker are
+  released together, and the worker port is never exposed to clients.
+
+## Request flow
+
+All three flows meet in `core.Service.Transcribe`. What differs is how the
+request is read and how the result is written.
+
+### Legacy: `POST /asr`
+
+1. `auth.Middleware` checks the credentials when authentication is on and
+   stores the identity in the request context.
+2. `internal/legacy` reads the query string the way FastAPI does and the
+   body the way Starlette does (see
+   [Legacy compatibility](#legacy-compatibility)). The `audio_file` part is
+   streamed straight into the decoder: with `encode=true` (the default) into
+   ffmpeg, with `encode=false` it is taken as raw PCM at
+   `legacy.raw_sample_rate`.
+3. It calls `Transcribe` with `LegacyOutput` set to the `output` parameter,
+   priority normal and no segment callback.
+4. The hub resolves the model, checks access, drops options the engine does
+   not support (upstream ignores them silently), queues the job and sends it
+   to a worker with `legacy_output` set.
+5. The worker returns the transcript already rendered in the requested
+   format (`Result.Rendered`). The frontend writes these bytes unchanged,
+   with upstream's headers: `Asr-Engine`, `Content-Disposition`,
+   `Content-Type: text/plain; charset=utf-8`, plus the reference's
+   `X-Audio-Duration-Seconds`.
+
+`POST /detect-language` is the same with `DetectLanguage`; the JSON answer
+is built in the frontend. `/`, `/docs`, `/redoc`, `/openapi.json` and
+`/assets/*` are served from files embedded in the binary.
+
+### OpenAI: `POST /v1/audio/transcriptions`
+
+1. `auth.Middleware`, as above. Rejections under `/v1/` are written by
+   `openaiapi.WriteError`, so SDKs get the error objects they expect.
+2. `internal/openaiapi` reads the multipart form field by field, validates
+   each field on arrival with OpenAI's error codes, and streams the `file`
+   part into ffmpeg.
+3. It calls `Transcribe` with priority normal. Word timestamps are requested
+   from the engine only when the response can carry them (`verbose_json`
+   with `timestamp_granularities` containing `word`).
+4. The response is rendered in Go from the engine-neutral segments: `json`,
+   `text`, `srt`, `vtt` or `verbose_json`.
+5. With `stream=true` and format `json` or `text`, the frontend passes a
+   segment callback and sends each segment as a server-sent event
+   `transcript.text.delta`, then `transcript.text.done`. The response status
+   is sent with the first event, so a failure before any segment is still a
+   normal HTTP error.
+
+`POST /v1/audio/translations` sets the task to translate and ignores
+`language`, `stream` and `timestamp_granularities`, as `whisper-1` does.
+`GET /v1/models` lists model ids and aliases the caller may use.
+
+### Wyoming
+
+1. On connect, `auth.WyomingIdentity` maps the remote address to an identity
+   (Wyoming has no credentials). A refused connection gets an `error` event.
+2. `describe` is answered with `info`: one speech-to-text program whose
+   models are the ones the identity may use.
+3. `transcribe` names the model and language for the next utterance.
+   `audio-start`, `audio-chunk` and `audio-stop` carry the audio, which is
+   buffered up to `wyoming.max_utterance_bytes` and
+   `wyoming.max_utterance_duration`.
+4. At `audio-stop` the buffered audio is converted with
+   `AudioDecoder.FromRaw` and passed to `Transcribe` with priority
+   interactive. The requested language is mapped to a Whisper code the model
+   supports (`zh-HK` to `yue`, `pt-BR` to `pt`); anything unusable means
+   automatic detection.
+5. The answer is a `transcript` event. With `wyoming.stream_transcripts` it
+   is wrapped in `transcript-start`, `transcript-chunk` and
+   `transcript-stop`.
+6. A failed job sends an `error` event and closes the connection, because
+   older Home Assistant versions notice a failure only that way.
+
+A connection runs one transcription at a time; up to two more finished
+utterances may wait behind it.
+
+### Errors per protocol
+
+The hub reports failures as error kinds; each frontend translates them:
+
+| Kind | Legacy | OpenAI | Wyoming |
+|---|---|---|---|
+| `bad_request` | 500 `{"detail":"Transcription failed"}` (the reference answers every engine exception this way) | 400 `invalid_request_error` | `error` event |
+| `bad_audio` | 400 with the reference's detail text | 400, `param` `file`, `code` `invalid_value` | `error` event |
+| `unauthenticated` | 401 with a Basic challenge | 401 `invalid_api_key` | `error` event at connect |
+| `forbidden` | 403 `{"detail": ...}` | 403 `model_not_allowed` | `error` event |
+| `model_not_found` | 404 `{"detail": ...}` | 404 `model_not_found` | `error` event |
+| `unavailable` | 503 `{"detail": ...}` | 503 `server_error` | `error` event |
+| `internal` | 500 `{"detail":"Transcription failed"}` | 500 `server_error` | `error` event |
+| `canceled` | nothing: the client is gone | 499, for the log | nothing |
+
+Invalid legacy query parameters never reach the hub: the frontend answers
+them with FastAPI's 422 body.
 
 ## Model selection and access
 
-- Workers report their models. The hub exposes them by id, plus aliases from
-  config. `whisper-1` is an alias of the default model out of the box.
-- Unknown model names fall back to the default model by default (many OpenAI
-  clients hardcode names); a config switch makes them an error instead.
-- Per-user `models` patterns in the users file decide access. A user with no
-  patterns may use only the default model. A request for a known model the
-  user is not allowed to use fails with `KindForbidden`; it never silently
-  falls back.
-- `/v1/models` and Wyoming `info` list only what the caller may use.
-- Wyoming has no credentials: connections map to a configured user, with an
-  optional source CIDR allowlist.
+Workers report their models. The hub merges the reports of all healthy
+workers into one list of model ids and adds the configured aliases.
+
+A model name from a client is resolved in this order:
+
+1. Empty: the default model. That is `hub.default_model`, or, when it is not
+   set, the default model of the first healthy worker in configuration order.
+2. The id of a model that is being served: that model.
+3. An alias from `hub.aliases`: its target; an empty target means the
+   default model. `whisper-1` is always an alias of the default model unless
+   it is mapped to something else.
+4. The id of a model that was served earlier but has no healthy worker now:
+   the job fails as `unavailable`. It never falls back to another model.
+5. Anything else is an unknown name. `hub.unknown_model: default` (the
+   default) uses the default model, because many OpenAI clients hardcode
+   model names; `error` fails the job as `model_not_found`.
+
+After resolution the hub asks the `Authorizer` whether the caller may use
+the model:
+
+- A user may always use the default model, plus every model id matched by
+  one of the `models` patterns of the user's entry. A pattern is an exact id
+  or a glob in which `*` matches any run of characters, `/` included.
+- A request for a model the user may not use fails as `forbidden`. It never
+  silently falls back to the default model.
+- Anonymous callers (authentication off) may use every model, unless
+  `auth.anonymous.restrict` limits them to the default model plus
+  `auth.anonymous.models`.
+
+`Models` applies the same rule, which is why `/v1/models` and the Wyoming
+`info` answer show only what the caller may use.
+
+When several workers serve one model id, the model has an optional feature
+only if all of them have it, so that a job is valid on whichever worker it
+lands.
+
+Options the engine cannot honor are handled per protocol. Legacy requests
+never fail on them, because upstream ignores them: the option is dropped,
+and `translate` becomes `transcribe`. Other protocols get `bad_request` for
+options that would change the shape of the answer (translation, word
+timestamps, diarization). `vad_filter` is only a hint and is dropped for
+everyone.
 
 ## Authentication
 
-- Off when no users file is configured (everything anonymous, as upstream).
-- Accepted credentials: HTTP Basic (bcrypt password), `Authorization: Bearer
-  <api key>`, and `X-Api-Key: <api key>`.
-- Protected: `/asr`, `/detect-language`, `/v1/*`. Public: `/`, `/docs`,
-  `/openapi.json`, `/assets/*`, `/healthz`.
-- Every job produces a usage record (user, protocol, endpoint, model, audio
-  seconds, queue and processing time, status) and a log line.
+Authentication is off until `auth.users_file` is set. While it is off, every
+caller is anonymous, as with upstream.
 
-## Worker API (internal, no auth)
+When it is on:
 
-HTTP/1.1 on port 9100. All JSON is UTF-8.
+- `auth.Middleware` wraps the HTTP mux. Paths under `auth.protected_paths`
+  (default `/asr`, `/detect-language`, `/v1/`) need credentials; everything
+  else is public. `OPTIONS` requests pass without credentials, because
+  browsers send CORS preflights without them. The path is cleaned before
+  matching, so `/v1/../asr` cannot dodge the rule.
+- Accepted credentials: HTTP Basic with a bcrypt password hash,
+  `Authorization: Bearer <api key>`, and `X-Api-Key: <api key>`.
+- The users file holds hashes only, so it can be reviewed and mounted
+  read-only. Passwords use bcrypt at cost 12, because an offline attack on a
+  leaked file is the realistic threat. API keys are 256 random bits and are
+  stored as SHA-256: a slow hash would add nothing against guessing and
+  would cost every request.
+- bcrypt takes about 250 ms by design. A verified Basic login is therefore
+  remembered for 5 minutes, keyed by an HMAC under a per-process secret over
+  the name, password and stored hash. A reload of the users file clears this
+  cache, so a removed user stops working at once.
+- Failed attempts are counted per client address in fixed windows
+  (`auth.rate_limit`). A blocked address is rejected without a bcrypt
+  evaluation; cached logins and valid API keys still pass, since they cost
+  no bcrypt time. Unknown users take as long as known ones.
+- The users file is polled for changes (`auth.poll_interval`) rather than
+  watched: editing the file in a running container should be enough, and
+  inotify is unreliable across bind mounts. A file that does not parse keeps
+  the previous users. No users file problem prevents startup: a gateway
+  that will not start cannot be fixed from inside its container.
+- Each API rejects in its own dialect. Legacy paths get exactly the 401 the
+  sidecar returned, with a Basic challenge; `/v1/` gets an OpenAI error
+  object.
+- Wyoming carries no credentials. Connections act as the users file entry
+  named in `auth.wyoming.user`, optionally restricted to source networks in
+  `auth.wyoming.allow_cidrs`.
+- `http.open_listen` serves the same routes on a second address without the
+  middleware. It exists to reproduce the sidecar deployment, where the
+  proxy port required credentials and the webservice port did not.
 
-### `GET /healthz`
-`200 {"status":"ok"}` once the process can accept jobs.
+## Usage accounting
 
-### `GET /v1/info`
-```json
-{
-  "engine": "faster_whisper",
-  "version": "worker and library versions, free form",
-  "device": "cpu",
-  "models": [{"id": "tiny", "default": true, "loaded": true}],
-  "languages": ["af", "am", "..."],
-  "capabilities": {"word_timestamps": true, "vad_filter": true, "diarize": false, "translate": true}
-}
-```
-Exactly one model has `"default": true`.
+The hub creates one usage event per job, when the job finishes, whatever the
+outcome: user, protocol, endpoint, resolved model, engine, task, seconds of
+audio, time spent queued, total time, status and error text. The audio
+length is known before the job runs because the gateway decoded the audio.
+The event is recorded with a context detached from the request, so a job
+whose client disconnected is still recorded.
 
-### `POST /v1/transcribe`
-`multipart/form-data` with two parts, in this order:
+`auth` receives the event and does three things with it:
 
-- `options`: `application/json`
-  ```json
-  {
-    "model": "tiny",            // optional, default model when absent
-    "task": "transcribe",       // or "translate"
-    "language": null,           // Whisper code or null for auto
-    "prompt": null,
-    "temperature": null,        // null = engine default
-    "vad_filter": false,
-    "word_timestamps": false,
-    "diarize": false, "min_speakers": null, "max_speakers": null,
-    "legacy_output": null       // "txt" | "vtt" | "srt" | "tsv" | "json" | null
-  }
-  ```
-- `audio`: `application/octet-stream`, raw PCM s16le mono 16 kHz.
+1. Updates the per-user totals in memory. Seconds of successfully
+   transcribed audio and seconds of audio whose job failed are kept apart:
+   adding them would either overcharge for failed work or hide how much
+   processing is being lost.
+2. Appends one JSON line to the request log, if `auth.usage.log_file` is
+   set. The write is synchronous: one small write per job is cheap next to a
+   transcription.
+3. Writes the one Info log line of the job.
 
-Response `200 application/x-ndjson`, one JSON object per line, flushed as
-produced:
+The totals are written to `auth.usage.totals_file` atomically (temporary
+file, fsync, rename) every `auth.usage.snapshot_interval` when they changed,
+and once more at shutdown. They are served to admin users at
+`GET /_hub/usage`.
 
-```
-{"type":"info","model":"tiny","engine":"faster_whisper","language":"en","language_probability":0.98,"duration":12.34}
-{"type":"segment","segment":{"id":0,"seek":0,"start":0.0,"end":2.5,"text":" Hello","tokens":[1,2],"temperature":0.0,"avg_logprob":-0.2,"compression_ratio":1.1,"no_speech_prob":0.01,"words":[{"word":" Hello","start":0.0,"end":0.4,"probability":0.9}],"speaker":null}}
-{"type":"done","text":" Hello","language":"en","rendered":"Hello\n"}
-```
+Requests that never become a job are not usage: a failed login, an invalid
+parameter, an upload that does not decode. Failed logins are written to the
+request log for auditing, without any derivative of the password, and are
+deliberately kept out of the totals so that nobody can create entries for
+names of their choosing.
 
-- `info` comes first, `done` last. `words` and `speaker` may be null/absent.
-- Engines that cannot stream (whisperx, openai-whisper) emit all segments
-  right before `done`.
-- `rendered` is present only when `legacy_output` was set. It is the exact
-  body the upstream service would return from `/asr` for this engine and
-  output format, produced with the same code upstream uses.
-- A failure after the stream started is a final line
-  `{"type":"error","code":"...","message":"..."}` instead of `done`.
-- A failure before any output is an HTTP error with body
-  `{"error":{"code":"...","message":"..."}}`: `400 bad_request`,
-  `404 model_not_found`, `503 unavailable`, `500 internal`.
-- When the client closes the connection the worker stops the job as soon as
-  the engine allows.
-- The worker runs one job at a time per model and queues the rest; the
-  gateway normally never sends more than one job per worker at once.
+Accounting works with authentication off; the user is then `anonymous`.
 
-### `POST /v1/detect-language`
-Same multipart shape; `options` is `{"model": null}`. Response
-`200 {"language":"en","confidence":0.98,"model":"tiny","engine":"faster_whisper"}`.
-Only the first 30 seconds are used, as upstream does.
+The field lists and the operator's view are in the
+[README](../README.md#usage-accounting).
 
-## Legacy compatibility reference
+## Scheduling and priorities
 
-- Upstream source: `/path/to/whisper-asr-webservice`
-  (upstream; branches `main` and `main` matter. Read other
-  branches with `git show <branch>:<path>`; do not switch branches there
-  and do not modify that repository).
-- A built reference image exists locally: `whisper-asr-webservice:ec32cd5`. Use it
-  to capture ground-truth responses rather than assuming behavior.
-- Frozen observable behavior: paths, parameter names and defaults, status
-  codes, error bodies, response headers, content types, output bytes, and
-  the environment variables documented in `docs/environmental-variables.md`.
+Each worker runs at most `max_in_flight` jobs (default 1). Jobs that cannot
+start wait in one queue for the whole hub, bounded by `hub.queue_length`.
 
-## Conventions (apply to all code in this repository)
+- Whenever a slot frees up or a worker appears, waiting jobs are considered
+  by effective priority, highest first, then by arrival. Each goes to the
+  least loaded healthy worker that serves its model and has a free slot;
+  equally loaded workers take turns.
+- A job whose model has no free worker does not block jobs for other models.
+- There are three priorities: batch, normal and interactive. Legacy and
+  OpenAI requests are normal; Wyoming requests are interactive, so a
+  two-second voice command waits only for the job already running, not
+  behind an hour-long file. No frontend submits batch jobs.
+- The effective priority is the requested one plus one level for every
+  `hub.priority_aging` interval the job has waited, capped at interactive.
+  This bounds starvation: after one interval a normal job competes with
+  interactive ones in arrival order. A negative interval disables aging.
+- Running jobs are never preempted.
+- When the queue is full, a new job pushes out the newest waiting job of
+  strictly lower effective priority, which fails as `unavailable`. If there
+  is none, the new job itself fails as `unavailable`.
+- A waiting job whose model loses its last healthy worker fails at once
+  instead of waiting for an unknown time.
 
-- Commit only on your own worktree branch and only your own paths. The
-  whole commit message is at most 196 characters: `type: short imperative
-  subject`, a blank line, one short sentence on why. Never run `git push`.
-  Never use `git -C`; `cd` instead.
-- ASCII only in code and comments: `->` not an arrow glyph. Never use the
-  em-dash character anywhere, including docs and reports; use " - ", a colon
-  or a comma.
-- Comments explain why, not what; one or two lines. Exported identifiers get
-  a doc comment starting with the identifier name.
-- Go logging: `log/slog`. Info for lifecycle and one line per job, written
-  by the usage recorder (frontends and the hub log jobs at Debug);
-  Debug for every step of an interaction (request parameters, outgoing HTTP
-  calls, protocol events, queueing). Never log credentials or audio.
-- Python: stdlib `logging` with the same level discipline.
-- Do not install software on the host. Go, git, docker, ffmpeg and python3
-  are available; everything else (pip packages, other toolchains, client
-  SDKs) runs in docker. The machine is slow: use the smallest models
-  (`tiny`) and avoid pulling large images when an existing one will do.
-  A Hugging Face token is in `/path/to/.env`
-  if a download needs it; never print or copy it into the repository.
-- Go verification before reporting: `gofmt -l`, `go vet ./...`,
-  `go test -race ./...` for your packages.
-- Claims need evidence: when behavior of upstream, the OpenAI SDK, or a
-  Wyoming client is in question, check it against the real thing in docker.
-- Shell `cd` does not persist between your commands: use absolute paths or
-  `cd <dir> && <cmd>`.
+Worker health is tracked by probing: `GET /healthz`, then `GET /v1/info`.
+A healthy worker is probed every `hub.poll_interval`. One that is down or
+still loading is probed with exponential backoff between `hub.retry_min` and
+`hub.retry_max`. A healthy worker leaves rotation after `hub.fail_threshold`
+consecutive failed probes, because a busy Python process can miss one. A job
+that fails with a transport error triggers an immediate probe. The gateway
+never waits for workers at startup; until the default model is served by a
+healthy worker, `/healthz` answers 503 and jobs fail as `unavailable`.
 
-## Final report format (for module owners)
+## Legacy compatibility
 
-Keep it under 60 lines: public API of your package (signatures), config
-fields, dependencies added, what was verified and how (commands, results),
-known gaps, and anything you need changed in `internal/core`.
+### What it is measured against
+
+The reference is upstream as it stood after its 1.10.0 release, plus a small
+set of patches that the deployments whisper-hub was written to replace were
+running. The patches change what a client can observe in three ways:
+
+- An upload that cannot be decoded is answered with
+  `400 {"detail": "<reason> (<size> bytes, magic=<first 12 bytes, hex>)"}`,
+  and an engine failure with `500 {"detail": "Transcription failed"}`.
+- `/asr` and `/detect-language` report the length of the decoded audio in an
+  `X-Audio-Duration-Seconds` header, and `/detect-language` also in an
+  `audio_duration_seconds` field.
+- Uploads are written to a spool file before decoding, so M4A files with the
+  index at the end decode correctly. This added the `UPLOAD_SPOOL_DIR`,
+  `DEBUG_FAILED_UPLOADS_DIR` and `LOG_LEVEL` variables.
+
+whisper-hub reproduces the reference, including these three.
+
+### How identical output is achieved
+
+A transcript is the product of four things: the decoded audio, the model and
+library that process it, the code that formats the result, and the HTTP
+framework around it. Each is matched separately.
+
+1. **Same audio.** The gateway images ship the exact ffmpeg build of the
+   upstream image (`onerahmet/ffmpeg:n7.1`) and call it for the same output
+   format, so an upload decodes to the same samples.
+2. **Same engine code path.** Each worker engine makes the same library
+   calls with the same arguments as the corresponding upstream engine
+   module, and the Python package versions are pinned to those of the
+   reference image (`worker/requirements/constraints.txt`).
+3. **Same formatting code.** The response body is rendered inside the
+   worker: by the library's own writers for openai_whisper and whisperx, and
+   by a copy of upstream's writer classes for faster_whisper. The gateway
+   passes the bytes through and never reformats a legacy transcript.
+4. **Same HTTP behavior.** `internal/legacy` reproduces what FastAPI,
+   Starlette, python-multipart and the Python standard library do around
+   the body:
+   - query parsing: the last value of a repeated parameter wins, booleans
+     and integers accept what pydantic accepts, and validation errors are
+     FastAPI's 422 JSON in declaration order;
+   - multipart parsing: a port of python-multipart, because Go's
+     `mime/multipart` differs in observable ways (it accepts a preamble,
+     decodes RFC 2231 filenames, strips directories from filenames);
+   - Python's JSON string escaping and float formatting, latin-1 header
+     encoding, and Starlette's redirects for trailing slashes;
+   - the Swagger and ReDoc pages, the bundled assets with their `ETag` and
+     `Last-Modified` values, and one OpenAPI schema per engine, all captured
+     from the reference and embedded in the binary.
+
+Two upstream quirks are kept on purpose, because removing them would change
+output: whisperx diarization passes `min_speakers` and `max_speakers`
+positionally, so they land in the wrong parameters of the diarization
+pipeline; and the `/detect-language` confidence of openai_whisper is the
+probability of `zh`, not of the detected language.
+
+### How it is guarded
+
+- `internal/legacy/testdata/reference/cases/` holds recorded exchanges with
+  the reference: ordinary requests, every validation error, malformed and
+  truncated bodies, odd filenames, static pages. `go test` replays each
+  request against the frontend, with a fake service that returns the
+  reference's own transcript bytes, and compares status, headers and body.
+- The worker's tests pin the copied writer code and compare it with the
+  installed faster-whisper library.
+- An end-to-end comparison sends the same uploads to a running reference and
+  to a whisper-hub image and compares every response. Its results are in the
+  [README](../README.md#verification-status); how to run it is in
+  [AGENTS.md](../AGENTS.md#end-to-end-checks).
+
+The deliberate deviations are listed in the
+[README](../README.md#known-differences).
+
+## Configuration
+
+All configuration is resolved in one place, `internal/config`, in increasing
+precedence: built-in defaults, one YAML file, the variables of an upstream or
+sidecar deployment, `WHISPER_HUB_*` variables, command line flags.
+
+- The environment variable of a setting is derived from its YAML path by
+  reflection, so a new field gets its variable without extra code.
+- Unknown keys in the YAML file, and in the users file, are errors. A
+  misspelled key would otherwise be ignored silently.
+- Zero values mean "default" and each package resolves its own defaults, so
+  the defaults live next to the code that uses them.
+- Upstream's variables and flags (`--host`, `--port`, `LOG_LEVEL`,
+  `SAMPLE_RATE`, ...) and the sidecar's `SIDECAR_*` variables are
+  mapped onto the same settings, which is what makes the image a drop-in
+  replacement.
+- Worker settings are not part of this: the worker reads its own environment
+  variables, and in the all-in-one image it inherits the container's
+  environment unchanged.
+
+## Images and process supervision
+
+| Image | Built from | Contents |
+|---|---|---|
+| all-in-one, one engine | `deploy/Dockerfile`, `ENGINE=<engine>` | gateway, ffmpeg, one engine's worker |
+| all-in-one, all engines | `deploy/Dockerfile`, `ENGINE=all` | gateway, ffmpeg, the three real engines in one Python environment |
+| gateway | `deploy/Dockerfile.gateway` | gateway and ffmpeg on a minimal base, running as an unprivileged user |
+| worker | `worker/Dockerfile`, `ENGINE=<engine>` | one engine's worker |
+| CUDA variants | `deploy/Dockerfile.gpu`, `worker/Dockerfile.gpu` | the same on an NVIDIA CUDA runtime base |
+
+In the all-in-one image the gateway is PID 1 and starts the worker as its
+child (`internal/workerproc`, enabled by `worker.command`). There is no
+supervisor script, for three reasons:
+
+- Signals reach the process that knows the shutdown order: stop accepting,
+  let running requests finish within `http.shutdown_grace`, stop Wyoming,
+  then stop the worker last, because draining requests still need it.
+- If the worker dies, the gateway exits, so the container is restarted
+  instead of answering "unavailable" forever.
+- The worker is started last, after the listeners are bound, so a port
+  conflict or a configuration error does not leave a worker loading a model.
+
+The worker listens on a loopback port that an upstream-style `--port` value
+is unlikely to collide with, and loads its model at startup, as upstream
+does. Unlike upstream, the gateway is already listening during that time and
+answers 503.
+
+A single-engine image treats an unset `ASR_ENGINE` as "the engine of this
+image", while upstream defaults to `openai_whisper`. Asking for an engine
+the image does not contain fails at startup with a message that names the
+image to use. The all-engines image behaves as upstream: `ASR_ENGINE` picks
+the engine and defaults to `openai_whisper`. It runs one engine per
+container start.
+
+The all-in-one images run as root because upstream does: existing model
+cache volumes are owned by root.
+
+## Design principles
+
+The code is organized around deep modules. The vocabulary below is used in
+this precise sense throughout the project.
+
+| Term | Meaning |
+|---|---|
+| module | anything with an interface and an implementation: a function, a type, a package, or the worker as a whole |
+| interface | everything a caller must know to use a module correctly. Not only the signatures: also invariants, ordering constraints, error modes and required configuration |
+| implementation | the code inside a module |
+| seam | the place where a module's interface lives: a point where behavior can be changed without editing the callers |
+| adapter | a concrete thing that satisfies an interface at a seam, for example the hub and a test fake are two adapters of `core.Service` |
+| depth | how much behavior a caller gets per unit of interface it has to learn. A deep module hides a lot behind a small interface; a shallow one has an interface nearly as complex as its implementation |
+| leverage | what callers gain from depth: one implementation serves many call sites and many tests |
+| locality | what maintainers gain from depth: a change, a bug and the knowledge about them stay in one place instead of spreading over the callers |
+
+The rules that follow from it:
+
+- **Build deep modules.** Before exporting an identifier, ask whether it can
+  stay inside. Fewer exported functions, simpler parameters and more
+  complexity hidden behind them is the direction to push in. Depth is a
+  property of the interface: a deep module may be composed of small
+  swappable parts inside, as long as they are not part of its interface.
+- **The deletion test.** Imagine the module deleted. If its complexity
+  simply disappears, or moves unchanged into its only caller, the module was
+  a pass-through and should be merged into that caller. If the complexity
+  would reappear in several callers, the module earns its place.
+- **The interface is the test surface.** Tests use the same interface as
+  callers and assert on observable outcomes, so they survive internal
+  changes. Wanting to test past the interface is a sign that the module has
+  the wrong shape. Nothing is exported only because a test wants it.
+- **One adapter is a hypothetical seam, two is a real one.** An interface
+  type is introduced only where something really varies. A production
+  implementation plus a test stand-in counts as two. There are no
+  single-implementation interfaces kept "for flexibility".
+- **Accept dependencies, do not create them.** A constructor receives the
+  things it depends on (`New(cfg, service, decoder)`) instead of building
+  them, which is what lets a test pass a fake. Functions return results
+  rather than modify their arguments.
+
+How this shows in the code:
+
+- `core.Service` is deep. Three methods hide worker discovery and health,
+  alias resolution, access control, capability checks, queueing with
+  priorities, cancellation and usage accounting. That is why a frontend
+  contains only protocol code.
+- The seams are real ones. `core.Service` has the hub and the fakes in every
+  frontend's tests. `core.AudioDecoder` has the ffmpeg decoder and test
+  stand-ins. The worker API has the Python worker and the Go fake in
+  `internal/hub/workertest`. The Python `Engine` interface has four engines.
+- The worker API client is an internal seam of the hub
+  (`internal/hub/internal/workerclient`): the Go toolchain itself prevents
+  any other package from importing it.
+- How a dependency is tested depends on its kind. Pure logic is tested
+  directly. ffmpeg and the file system are local and cheap, so tests use the
+  real thing. The worker is a separate process that the project owns, so it
+  sits behind an interface with an in-memory adapter for tests.
+
+## Known trade-offs
+
+- **Audio is held in memory.** A job's PCM is one byte slice in the gateway
+  and one array in the worker, about 115 MB per hour of audio on each side.
+  Uploads are streamed to a spool file and never buffered, but the decoded
+  audio is not streamed to the engine.
+- **The queue is in memory.** A restart loses waiting jobs, and their
+  clients see a failed request.
+- **No job deadline.** Only the wait for the first line of a worker's
+  response is bounded (`hub.first_byte_timeout`). A stuck engine holds its
+  worker slot until the client gives up.
+- **No preemption.** An interactive job waits for the running job to finish.
+  With one worker and hour-long files that wait can be long; a separate
+  worker for interactive use is the remedy.
+- **State is per gateway process.** Usage totals, the rate limiter and the
+  queue are not shared, so running several gateways side by side splits
+  them.
+- **The worker API is unauthenticated.** It relies on the network: loopback
+  in the all-in-one image, a private network in the split setup.
+- **Wyoming identity is the network address.** The protocol has no
+  credentials, so access control is the source allowlist and one configured
+  user for all connections.
+- **Rate limiting uses fixed windows.** They are coarse, but need one map
+  entry per address and no timers.
+- **The request log is written synchronously.** A stalled disk stalls the
+  completion of jobs.
+- **Streaming depends on the engine.** whisperx returns everything at once
+  and openai_whisper in 30-second steps, so an OpenAI streaming client gets
+  its deltas in bursts with those engines.
+- **Fidelity pins versions.** Engine libraries are pinned to the versions of
+  the reference image, and the legacy pages and schemas are captures of it.
+  Upgrading a library or following a new upstream release means capturing
+  the reference again.
+- **HTTP edge cases follow Go's `net/http`.** Where uvicorn and Go disagree
+  below the application level (malformed requests, header order, request
+  limits), whisper-hub behaves like Go.
+- **The all-engines image is large and runs one engine per start.** Serving
+  two engines at once takes two workers.
