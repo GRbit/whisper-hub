@@ -53,8 +53,9 @@ type AnonymousConfig struct {
 }
 
 // RateLimitConfig throttles failed authentication attempts per client
-// address. A blocked address gets 429 without a bcrypt evaluation; cached
-// credentials and valid API keys still pass, since neither costs bcrypt time.
+// address. A blocked address gets 401 with a Retry-After header (not 429)
+// without a bcrypt evaluation; cached credentials and valid API keys still
+// pass, since neither costs bcrypt time.
 type RateLimitConfig struct {
 	// Failures allowed per Window before the address is blocked for the
 	// rest of the window. Default 10; negative disables rate limiting.
