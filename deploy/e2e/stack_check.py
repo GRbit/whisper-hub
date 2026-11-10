@@ -27,7 +27,7 @@ from wyoming.client import AsyncTcpClient
 from wyoming.info import Describe, Info
 
 sys.path.insert(0, "/interop")
-from client import ha_process_audio_stream  # noqa: E402  the wyoming owner's HA replay
+from client import ha_process_audio_stream  # noqa: E402  the HA replay of internal/wyoming/interop
 
 FAKE_TEXT = "Hello from the fake engine."
 failures = []

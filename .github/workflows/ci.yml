@@ -97,7 +97,7 @@ jobs:
           load: true
           cache-from: type=gha,scope=e2e
           cache-to: type=gha,mode=max,scope=e2e
-      - name: Owners' client checks (openai SDK, wyoming, Home Assistant replay, zeroconf)
+      - name: Real-client checks (openai SDK, wyoming, Home Assistant replay, zeroconf)
         run: deploy/e2e/clients.sh
       - name: Protocols, streaming, cancellation, priority, auth (Python fake worker)
         run: deploy/e2e/stack.sh fake

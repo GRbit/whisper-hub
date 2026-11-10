@@ -17,18 +17,15 @@ import (
 	"github.com/GRbit/whisper-hub/internal/core"
 )
 
-const testFiles = "/path/to/voice-test-files"
+// recording is a real speech recording kept in the repository for the
+// legacy reference tests.
+const recording = "../legacy/testdata/audio/english-front-center.wav"
 
-// voiceFile returns a recording from testFiles, or, where those are not
-// available (CI), a generated 44.1 kHz stereo tone of the same length, which
-// exercises the same decoder paths.
-func voiceFile(t *testing.T, name string, seconds float64) string {
+// tone writes a generated 44.1 kHz stereo sine of the given length, for
+// decoder paths where the content does not matter.
+func tone(t *testing.T, name string, seconds float64) string {
 	t.Helper()
-	p := filepath.Join(testFiles, name)
-	if _, err := os.Stat(p); err == nil {
-		return p
-	}
-	p = filepath.Join(t.TempDir(), name)
+	p := filepath.Join(t.TempDir(), name)
 	out, err := exec.Command("ffmpeg", "-v", "error", "-f", "lavfi", "-i",
 		fmt.Sprintf("sine=frequency=440:sample_rate=44100:duration=%g", seconds), "-ac", "2", p).CombinedOutput()
 	if err != nil {
@@ -68,7 +65,7 @@ func TestDecodeWAV(t *testing.T) {
 	needFFmpeg(t)
 	spool := t.TempDir()
 	d := New(Config{SpoolDir: spool}, nil)
-	f, err := os.Open(voiceFile(t, "english-front-center.wav", 1.428))
+	f, err := os.Open(recording)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,7 +87,7 @@ func TestDecodeWAV(t *testing.T) {
 // that first, then shows DecodeFile handles the same bytes.
 func TestDecodeTrailingMoovM4A(t *testing.T) {
 	needFFmpeg(t)
-	src := voiceFile(t, "german-20s.wav", 20)
+	src := tone(t, "long.wav", 20)
 	m4a := filepath.Join(t.TempDir(), "t.m4a")
 	if out, err := exec.Command("ffmpeg", "-v", "error", "-y", "-i", src, "-c:a", "aac", "-b:a", "128k", m4a).CombinedOutput(); err != nil {
 		t.Fatalf("ffmpeg encode: %v %s", err, out)

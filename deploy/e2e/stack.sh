@@ -17,7 +17,9 @@ aio_env=(-e ASR_MODEL=tiny)
 [ -n "${ASR_ENGINE:-}" ] && aio_env+=(-e "ASR_ENGINE=$ASR_ENGINE")
 e2e_image="${E2E_IMAGE:-whisper-hub-e2e:latest}"
 cache_volume="${CACHE_VOLUME:-whub-e2e-cache}"
-voice="${VOICE_FILES:-/path/to/voice-test-files}"
+# A directory with english-front-center.wav and german-20s.wav (see AGENTS.md);
+# required in real mode, optional in fake mode.
+voice="${VOICE_FILES:-}"
 net=whub-stack
 names=(whub-s-worker whub-s-gw whub-s-gw-auth whub-s-aio whub-s-aio-proxy)
 work="$(mktemp -d)"
@@ -31,7 +33,7 @@ docker network create "$net" >/dev/null
 
 mkdir -p "$work/audio" "$work/data"
 chmod 777 "$work/data"
-if [ -f "$voice/english-front-center.wav" ]; then
+if [ -n "$voice" ] && [ -f "$voice/english-front-center.wav" ]; then
 	cp "$voice/english-front-center.wav" "$voice/german-20s.wav" "$work/audio/"
 elif [ "$mode" = fake ]; then
 	# CI has no recordings; the fake engine ignores the content anyway.
@@ -39,7 +41,7 @@ elif [ "$mode" = fake ]; then
 	ffmpeg -v error -f lavfi -i "sine=frequency=440:sample_rate=44100:duration=1.428" -ac 2 "$voice/english-front-center.wav"
 	ffmpeg -v error -f lavfi -i "sine=frequency=440:sample_rate=44100:duration=20" -ac 2 "$voice/german-20s.wav"
 else
-	echo "real mode needs the recordings in VOICE_FILES ($voice)" >&2
+	echo "stack.sh real: set VOICE_FILES to a directory with english-front-center.wav and german-20s.wav" >&2
 	exit 2
 fi
 ffmpeg -v error -i "$voice/english-front-center.wav" -f s16le -ac 1 -ar 16000 "$work/audio/english-front-center.pcm"

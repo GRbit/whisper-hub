@@ -3,8 +3,8 @@
 #   - the openai Python SDK: internal/openaiapi/cmd/fakeserver/sdk_check.py
 #   - the wyoming package and a Home Assistant STT replay:
 #     internal/wyoming/interop/client.py and zeroconf_check.py
-# The owners' scripts run unmodified; only their targets change (the
-# gateway containers take the host names the scripts expect).
+# Those checks run unmodified; only their targets change (the gateway
+# containers take the host names the scripts expect).
 #   GATEWAY_IMAGE=whisper-hub-gateway:latest deploy/e2e/clients.sh
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
