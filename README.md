@@ -85,10 +85,14 @@ CI publishes these images to `ghcr.io/grbit/`, for linux/amd64 only:
 | `whisper-hub:openai_whisper` | 2.7 GB | all-in-one: gateway + openai_whisper worker |
 | `whisper-hub:whisperx` | 3.7 GB | all-in-one: gateway + whisperx worker |
 | `whisper-hub:all` | 4.0 GB | all-in-one: gateway + all three engines; `WHISPER_HUB_ENGINE` picks one at startup |
-| `whisper-hub:<engine>-gpu` | about 7 GB (faster_whisper) to 15 GB (all) | CUDA builds of the four above, see [GPU](#gpu) |
+| `whisper-hub:<engine>-gpu` | 5.4 GB (faster_whisper), 10.7 GB (openai_whisper), 11.4 GB (whisperx), 11.6 GB (all) | CUDA builds of the four above, see [GPU](#gpu) |
 | `whisper-hub-gateway` | 150 MB | gateway only, for the [split setup](#split-setup); runs as uid 65532 |
 | `whisper-hub-worker:<engine>` | | worker only, for the split setup: `faster_whisper` (the default variant), `openai_whisper`, `whisperx`, and the model-free `fake` used in tests. See [worker/README.md](worker/README.md) |
-| `whisper-hub-worker:<engine>-gpu` | about 7 to 14 GB | CUDA workers: `faster_whisper`, `openai_whisper`, `whisperx` |
+| `whisper-hub-worker:<engine>-gpu` | as the all-in-one CUDA image of that engine | CUDA workers: `faster_whisper`, `openai_whisper`, `whisperx` |
+
+Size is the unpacked size on disk. The download is smaller: 0.2 to 0.9 GB
+for the CPU all-in-one images, 3.3 GB (faster_whisper) to 6.7 GB (all) for
+the CUDA ones.
 
 ### Tags
 
