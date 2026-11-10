@@ -521,9 +521,8 @@ probability of `zh`, not of the detected language.
   installed faster-whisper library.
 - An end-to-end comparison sends the same uploads to a running reference and
   to a whisper-hub image and compares every response, again with the
-  extensions applied explicitly (`deploy/e2e/fidelity.py`). Its results are in the
-  [README](../README.md#verification-status); how to run it is in
-  [AGENTS.md](../AGENTS.md#end-to-end-checks).
+  extensions applied explicitly (`deploy/e2e/fidelity.py`). How to run it
+  is in [AGENTS.md](../AGENTS.md#end-to-end-checks).
 
 The deliberate deviations are listed in the
 [README](../README.md#known-differences).

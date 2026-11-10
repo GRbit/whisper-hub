@@ -38,7 +38,7 @@ Contents: [Quick start](#quick-start) -
 [Authentication](#authentication-and-model-access) -
 [Usage accounting](#usage-accounting) -
 [Migrating](#migrating-from-whisper-asr-webservice) -
-[Compatibility](#compatibility) - [Verification status](#verification-status) -
+[Compatibility](#compatibility) -
 [Operations](#operations) - [Development](#development)
 
 ## Quick start
@@ -583,9 +583,8 @@ used it.
 - Compatible means API compatibility: the same paths, parameters, status
   codes and response shapes, with the [extensions](#extensions-to-upstream)
   listed below. whisper-hub does not promise byte-for-byte identity with
-  upstream. The byte-level comparison described here is a verification
-  tool, and its results under [Verification status](#verification-status)
-  are what was measured.
+  upstream. The byte-level comparison described below is a verification
+  tool for the project, not part of the promise.
 
 ### The reference
 
@@ -602,9 +601,8 @@ make image-reference   # docker build -t whisper-asr-webservice:ec32cd5 \
 
 The worker's engine libraries (`worker/requirements/constraints.txt`) are
 exactly the versions that image installs. The comparison sends the same
-upload to both and checks status code, headers and body; apart from
-whisper-hub's extensions below and the differences listed after them, the
-measured responses were the same.
+upload to both and checks status code, headers and body, allowing for
+whisper-hub's extensions below and the differences listed after them.
 
 ### Extensions to upstream
 
@@ -691,57 +689,6 @@ Wyoming:
 - Transcript streaming events are off by default
   (`wyoming.stream_transcripts`): Home Assistant reads only the final
   transcript.
-
-## Verification status
-
-All runs below were made with the scripts in `deploy/e2e/`, on CPU with the
-model `tiny`.
-
-- **Legacy, byte for byte** (`make e2e-fidelity`): the reference image and
-  the whisper-hub all-in-one image with the same engine (`tiny`, int8) get
-  the same original uploads (wav, mp3, ogg, and m4a with the index at the
-  end) with `encode=true`, in every output format, with these options:
-  default, `word_timestamps`, `vad_filter`, `language`, `task=translate`,
-  `initial_prompt`; plus `/detect-language`. That is 155 responses per run,
-  compared in status, headers (except `Date` and `Server`) and body.
-- **Real clients** (`make e2e-real`, `e2e-fake`, `e2e-clients`): the openai
-  Python SDK; the `wyoming` Python package (1.11.0) with a replay of Home
-  Assistant's speech-to-text client code and zeroconf discovery; and the
-  request shapes of existing whisper-asr-webservice clients (`POST
-  /asr?task=transcribe&output=txt&encode=true[&language=..][&vad_filter=true]`,
-  and `output=json` reading `text`), with and without Basic authentication
-  (Basic authentication with the fake engine only, `e2e-fake`).
-
-| Image | `ASR_ENGINE` | Real audio (`stack.sh real`) | Legacy fidelity (155 responses) |
-|---|---|---|---|
-| `whisper-hub:faster_whisper` | | 47/47 | 155 identical |
-| `whisper-hub:openai_whisper` | | 47/47 | 130 identical, 25 where upstream disagrees with itself between two runs, 0 unexplained |
-| `whisper-hub:whisperx` | | 47/47 | 130 identical, 25 where upstream answers 500 to `initial_prompt` and we answer, 0 unexplained |
-| `whisper-hub:all` | unset (`openai_whisper`) | 47/47 | 130 identical, 25 where upstream disagrees with itself, 0 unexplained |
-| `whisper-hub:all` | `faster_whisper` | 47/47 | 155 identical |
-| `whisper-hub:all` | `openai_whisper` | 47/47 | 130 identical, 25 where upstream disagrees with itself, 0 unexplained |
-| `whisper-hub:all` | `whisperx` | 47/47 | not run; covered by the package check below |
-
-The real-audio counts above were measured while `stack.sh real` also
-checked a compatibility mode that has since been removed. The current
-script makes 21 checks; all pass for `whisper-hub:faster_whisper`.
-
-- **`whisper-hub:all` package check** (`make e2e-packages`): every Python
-  package of the three single-engine images is installed in `:all` at the
-  same version (27, 36 and 113 packages, 0 differences). Since the worker
-  code is the same, `:all` behaves like the single-engine image for each
-  engine, which is why its fidelity runs are not part of
-  `make e2e-engines`.
-- openai_whisper is not deterministic upstream on some inputs (its
-  temperature fallback). The fidelity script therefore runs the reference
-  twice (`REF_TWICE=1`) and reports the cases where the reference disagrees
-  with itself separately.
-- With the fake engine (gateway image plus the Python fake worker): 47/47,
-  including streaming, cancellation when the client disconnects, priority
-  order as seen in the request log, and authentication on and off.
-- **Not verified**: diarization; a live Home Assistant instance; a
-  recording actually made by Android's MediaMuxer (an ffmpeg-made m4a with
-  the same layout was used).
 
 ## Operations
 

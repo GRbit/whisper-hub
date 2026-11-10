@@ -404,8 +404,7 @@ var badAudioDetail = map[string]string{
 	"asr_two_files":        "Failed to decode audio (6 bytes, magic=78313367320a)",
 	"detect_garbage":       "Failed to decode audio (7 bytes, magic=67617262616765)",
 	"asr_encode_false_odd": "Raw PCM payload has an odd length (3 bytes) (3 bytes, magic=010203)",
-	// Pending the maintainer's decision: upstream answers these with an
-	// empty 200 transcript, whisper-hub with 400.
+	// Extension 4: upstream answers these with an empty 200 transcript.
 	"asr_header_only_wav":    "Audio decoded to 0 samples (44 bytes, magic=524946462400000057415645)",
 	"asr_encode_false_empty": "Audio decoded to 0 samples (0 bytes, magic=)",
 }
