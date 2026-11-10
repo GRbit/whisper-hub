@@ -45,8 +45,8 @@ func newGateway(ctx context.Context, cfg config.Config, log *slog.Logger) (_ *ga
 		}
 	}()
 
-	// Before anything logs "started": a wrong ASR_ENGINE is a deployment
-	// error the operator must see first.
+	// Before anything logs "started": a wrong engine selection is a
+	// deployment error the operator must see first.
 	if _, err := cfg.Worker.Env(os.Environ()); err != nil {
 		return nil, err
 	}

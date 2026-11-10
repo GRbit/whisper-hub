@@ -461,8 +461,9 @@ whisper-hub reproduces it, plus a short list of its own extensions: the
 audio duration in a header and in the `/detect-language` JSON, JSON details
 for engine failures, a redacted 400 for audio that does not decode or has no
 samples, decoding from a spool file instead of a pipe (MP4 with the index at
-the end decodes, MP3 encoder delay is trimmed), and the
-`LOG_LEVEL`, `UPLOAD_SPOOL_DIR` and `DEBUG_FAILED_UPLOADS_DIR` variables. The
+the end decodes, MP3 encoder delay is trimmed), and the variables of a
+patched upstream build for the log level, the spool directory and failed
+upload dumps. The
 list, with what upstream answers instead, is in the
 [README](../README.md#extensions-to-upstream); the guards below apply
 exactly these extensions to upstream's responses, and nothing else.
@@ -539,11 +540,14 @@ deployment, `WHISPER_HUB_*` variables, command line flags.
   misspelled key would otherwise be ignored silently.
 - Zero values mean "default" and each package resolves its own defaults, so
   the defaults live next to the code that uses them.
-- Upstream's variables and flags (`--host`, `--port`, `LOG_LEVEL`,
-  `SAMPLE_RATE`, ...) are mapped onto the same settings, which is what
-  makes the image a drop-in replacement.
+- Upstream's variable names and flags are accepted as aliases of the
+  same settings, which is what makes the image a drop-in replacement; a
+  `WHISPER_HUB_` name wins over its alias. The README's drop-in table is
+  the one list of them.
 - Worker settings are not part of this: the worker reads its own environment
-  variables, and in the all-in-one image it inherits the container's
+  variables (`WHISPER_HUB_ENGINE` and `WHISPER_HUB_ENGINE_*`, a prefix no
+  gateway setting derives, plus the shared `WHISPER_HUB_LOG_LEVEL`) with the
+  same alias rule, and in the all-in-one image it inherits the container's
   environment unchanged.
 
 ## Images and process supervision
@@ -573,10 +577,10 @@ is unlikely to collide with, and loads its model at startup, as upstream
 does. Unlike upstream, the gateway is already listening during that time and
 answers 503.
 
-A single-engine image treats an unset `ASR_ENGINE` as "the engine of this
+A single-engine image treats an unset `WHISPER_HUB_ENGINE` as "the engine of this
 image", while upstream defaults to `openai_whisper`. Asking for an engine
 the image does not contain fails at startup with a message that names the
-image to use. The all-engines image behaves as upstream: `ASR_ENGINE` picks
+image to use. The all-engines image behaves as upstream: `WHISPER_HUB_ENGINE` picks
 the engine and defaults to `openai_whisper`. It runs one engine per
 container start.
 

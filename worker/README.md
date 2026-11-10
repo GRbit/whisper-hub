@@ -17,7 +17,7 @@ worker already; there, the variables below are set on that container.
 
 ## Engines
 
-| `ASR_ENGINE` | Library | Notes |
+| `WHISPER_HUB_ENGINE` | Library | Notes |
 |---|---|---|
 | `faster_whisper` | faster-whisper (CTranslate2) | no torch, smallest image; streams segments as they are decoded |
 | `openai_whisper` | openai-whisper (torch) | streams segments after each 30-second window |
@@ -55,7 +55,7 @@ same for the CPU images.
 ## Run
 
 ```shell
-docker run --rm -p 9100:9100 -e ASR_MODEL=tiny -v whisper-cache:/root/.cache \
+docker run --rm -p 9100:9100 -e WHISPER_HUB_ENGINE_MODEL=tiny -v whisper-cache:/root/.cache \
   whisper-hub-worker:faster_whisper
 docker run --rm -p 9100:9100 whisper-hub-worker:fake
 curl http://localhost:9100/v1/info
@@ -68,33 +68,36 @@ example is `deploy/docker-compose.split.yml`.
 ## Configuration
 
 The worker is configured by environment variables only. An invalid value
-stops it at startup with exit status 2.
+stops it at startup with exit status 2. An empty value counts as unset.
 
-Variables of whisper-asr-webservice keep its meaning:
+Settings that whisper-asr-webservice also has keep its meaning; its own
+variable names are accepted as aliases, listed in the
+[drop-in table](../README.md#migrating-from-whisper-asr-webservice), and the
+`WHISPER_HUB_` name wins when both are set:
 
 | Variable | Default | Notes |
 |---|---|---|
-| `ASR_ENGINE` | set by the image | `faster_whisper`, `whisperx`, `openai_whisper`, `fake`. Outside an image the default is `openai_whisper`, as upstream |
-| `ASR_MODEL` | `base` | a model name, a local path, a Hugging Face repository id, or a `https://huggingface.co/...` URL. URLs work with faster_whisper and whisperx only |
-| `ASR_MODEL_PATH` | `~/.cache/whisper` | where models are downloaded to. whisperx uses it only for Hugging Face URLs, as upstream |
-| `ASR_DEVICE` | `cuda` if available, else `cpu` | openai_whisper ignores it and uses CUDA whenever it is available, as upstream |
-| `ASR_QUANTIZATION` | `float32` with CUDA, else `int8` | a CTranslate2 compute type: `float32`, `float16`, `int8`, `bfloat16`, `int16`, `int8_float32`, `int8_float16`, `int8_bfloat16` |
-| `MODEL_IDLE_TIMEOUT` | `0` | seconds without use after which a model is unloaded; 0 means never |
+| `WHISPER_HUB_ENGINE` | set by the image | `faster_whisper`, `whisperx`, `openai_whisper`, `fake`. Outside an image the default is `openai_whisper`, as upstream |
+| `WHISPER_HUB_ENGINE_MODEL` | `base` | a model name, a local path, a Hugging Face repository id, or a `https://huggingface.co/...` URL. URLs work with faster_whisper and whisperx only |
+| `WHISPER_HUB_ENGINE_MODEL_PATH` | `~/.cache/whisper` | where models are downloaded to. whisperx uses it only for Hugging Face URLs, as upstream |
+| `WHISPER_HUB_ENGINE_DEVICE` | `cuda` if available, else `cpu` | openai_whisper ignores it and uses CUDA whenever it is available, as upstream |
+| `WHISPER_HUB_ENGINE_QUANTIZATION` | `float32` with CUDA, else `int8` | a CTranslate2 compute type: `float32`, `float16`, `int8`, `bfloat16`, `int16`, `int8_float32`, `int8_float16`, `int8_bfloat16` |
+| `WHISPER_HUB_ENGINE_MODEL_IDLE_TIMEOUT` | `0` | seconds without use after which a model is unloaded; 0 means never |
 | `HF_TOKEN` | empty | Hugging Face token for downloads; setting it enables whisperx diarization |
-| `SUBTITLE_MAX_LINE_WIDTH` | `1000` | whisperx subtitle output only |
-| `SUBTITLE_MAX_LINE_COUNT` | `2` | whisperx subtitle output only |
-| `SUBTITLE_HIGHLIGHT_WORDS` | `false` | whisperx subtitle output only; only the literal `true` turns it on |
-| `LOG_LEVEL` | `INFO` | `CRITICAL`, `ERROR`, `WARNING`, `INFO`, `DEBUG`. `DEBUG` logs every request, queueing step and segment |
+| `WHISPER_HUB_ENGINE_SUBTITLE_MAX_LINE_WIDTH` | `1000` | whisperx subtitle output only |
+| `WHISPER_HUB_ENGINE_SUBTITLE_MAX_LINE_COUNT` | `2` | whisperx subtitle output only |
+| `WHISPER_HUB_ENGINE_SUBTITLE_HIGHLIGHT_WORDS` | `false` | whisperx subtitle output only; only the literal `true` turns it on |
+| `WHISPER_HUB_LOG_LEVEL` | `INFO` | `CRITICAL`, `ERROR`, `WARNING` (or `WARN`), `INFO`, `DEBUG`, in any case; the same variable sets the gateway's `log.level`. `DEBUG` logs every request, queueing step and segment |
 
 Variables of the worker itself:
 
 | Variable | Default | Notes |
 |---|---|---|
-| `WORKER_HOST` | `0.0.0.0` | listen address |
-| `WORKER_PORT` | `9100` | listen port |
-| `WORKER_MODELS` | the value of `ASR_MODEL` | comma separated list of the models this worker serves; the first is its default model |
-| `WORKER_MAX_LOADED_MODELS` | `1` | how many models may be in memory at once |
-| `WORKER_PRELOAD` | `false` | `true` loads the default model at startup instead of on the first job; the worker then starts listening only once the model is loaded |
+| `WHISPER_HUB_ENGINE_HOST` | `0.0.0.0` | listen address |
+| `WHISPER_HUB_ENGINE_PORT` | `9100` | listen port |
+| `WHISPER_HUB_ENGINE_MODELS` | the value of `WHISPER_HUB_ENGINE_MODEL` | comma separated list of the models this worker serves; the first is its default model |
+| `WHISPER_HUB_ENGINE_MAX_LOADED_MODELS` | `1` | how many models may be in memory at once |
+| `WHISPER_HUB_ENGINE_PRELOAD` | `false` | `true` loads the default model at startup instead of on the first job; the worker then starts listening only once the model is loaded |
 
 How models and jobs are handled:
 
@@ -121,24 +124,24 @@ Segment `i` (counting from 0) has `id` i+1, `seek` i*200, `start` 2i, `end`
 3. `" The quick brown fox jumps over the lazy dog."`
 
 - Language: the requested language with probability 1.0, otherwise
-  `WORKER_FAKE_LANGUAGE` (default `en`) with probability 0.99. The task is
-  ignored. `/v1/detect-language` returns `WORKER_FAKE_LANGUAGE` with
+  `WHISPER_HUB_ENGINE_FAKE_LANGUAGE` (default `en`) with probability 0.99. The task is
+  ignored. `/v1/detect-language` returns `WHISPER_HUB_ENGINE_FAKE_LANGUAGE` with
   confidence 0.99.
 - `word_timestamps`: the words of the text, split on spaces (each with a
   leading space, as Whisper produces them), spread evenly over the segment,
   with probability 0.9. Otherwise `words` is null.
 - `legacy_output`: rendered exactly as upstream's faster_whisper engine
   would render these segments.
-- `WORKER_FAKE_SEGMENTS` (default 3) sets the number of segments.
-  `WORKER_FAKE_DELAY` (default 0) is the number of seconds waited before
+- `WHISPER_HUB_ENGINE_FAKE_SEGMENTS` (default 3) sets the number of segments.
+  `WHISPER_HUB_ENGINE_FAKE_DELAY` (default 0) is the number of seconds waited before
   each segment; the wait ends at once when the client disconnects.
 - A `prompt` that starts with `fake:` carries directives instead of a
   prompt, separated by commas or spaces:
 
   | Directive | Effect |
   |---|---|
-  | `delay=<seconds>` | overrides `WORKER_FAKE_DELAY` for this job |
-  | `segments=<n>` | overrides `WORKER_FAKE_SEGMENTS` for this job |
+  | `delay=<seconds>` | overrides `WHISPER_HUB_ENGINE_FAKE_DELAY` for this job |
+  | `segments=<n>` | overrides `WHISPER_HUB_ENGINE_FAKE_SEGMENTS` for this job |
   | `fail=<code>` | fails with an HTTP error before any output; code is `bad_request`, `model_not_found`, `unavailable` or `internal` |
   | `fail_after=<n>` | sends n segments, then an `error` line with code `internal` |
 

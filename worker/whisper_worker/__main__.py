@@ -5,7 +5,7 @@ import os
 import sys
 
 from . import __version__
-from .config import ConfigError, from_env
+from .config import ConfigError, from_env, lookup
 from .engines import create, cuda_probe
 
 
@@ -13,7 +13,7 @@ def main() -> int:
     logging.basicConfig(level="INFO", format="%(asctime)s %(levelname)s %(name)s %(message)s")
     log = logging.getLogger("whisper_worker")
     try:
-        cfg = from_env(cuda_available=cuda_probe(os.environ.get("ASR_ENGINE", "openai_whisper")))
+        cfg = from_env(cuda_available=cuda_probe(lookup(os.environ, "WHISPER_HUB_ENGINE")[1] or "openai_whisper"))
     except ConfigError as e:
         log.error("Invalid configuration: %s", e)
         return 2

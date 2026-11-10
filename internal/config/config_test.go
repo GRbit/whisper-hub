@@ -336,3 +336,13 @@ func TestYAMLKeepsSetValuesAndKeys(t *testing.T) {
 		}
 	}
 }
+
+// WHISPER_HUB_ENGINE and WHISPER_HUB_ENGINE_* belong to the engine worker,
+// so no gateway setting may derive a name there.
+func TestNoGatewaySettingUnderEngine(t *testing.T) {
+	for k := range renderedLeaves(t, load(t, nil, envOf())) {
+		if k == "engine" || strings.HasPrefix(k, "engine.") || strings.HasPrefix(k, "engine_") {
+			t.Errorf("%s derives a WHISPER_HUB_ENGINE name", k)
+		}
+	}
+}

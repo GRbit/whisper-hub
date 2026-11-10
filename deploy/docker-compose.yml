@@ -11,10 +11,10 @@ services:
       args:
         ENGINE: faster_whisper
     environment:
-      - ASR_MODEL=base
-      # Upstream variables keep working, e.g.:
-      # - ASR_QUANTIZATION=int8
-      # - LOG_LEVEL=DEBUG
+      - WHISPER_HUB_ENGINE_MODEL=base
+      # More settings (worker/README.md), e.g.:
+      # - WHISPER_HUB_ENGINE_QUANTIZATION=int8
+      # - WHISPER_HUB_LOG_LEVEL=debug
     ports:
       - "9000:9000"   # legacy + OpenAI API, /healthz
       - "10300:10300" # Wyoming (Home Assistant)

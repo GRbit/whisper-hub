@@ -2,11 +2,11 @@ GO      ?= go
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -s -w -X main.version=$(VERSION)
 # Engine of the all-in-one and worker images: faster_whisper, whisperx,
-# openai_whisper, or all (all-in-one only). ASR_ENGINE, when set, is passed
+# openai_whisper, or all (all-in-one only). WHISPER_HUB_ENGINE, when set, is passed
 # to the all-in-one container in the e2e runs (meaningful for ENGINE=all).
 ENGINE  ?= faster_whisper
-ASR_ENGINE ?=
-export ENGINE ASR_ENGINE
+WHISPER_HUB_ENGINE ?=
+export ENGINE WHISPER_HUB_ENGINE
 # The legacy reference: public upstream at a pinned commit (REF_URL,
 # REF_COMMIT, REF_IMAGE).
 include deploy/e2e/reference/upstream.env
@@ -93,14 +93,14 @@ e2e-packages:
 	deploy/e2e/packages.sh
 
 # e2e-real and e2e-fidelity for every single-engine image; for
-# whisper-hub:all the real-audio run per ASR_ENGINE (and unset) plus
+# whisper-hub:all the real-audio run per WHISPER_HUB_ENGINE (and unset) plus
 # e2e-packages. Fidelity can still target :all by hand:
-#   make e2e-fidelity ENGINE=all ASR_ENGINE=whisperx
+#   make e2e-fidelity ENGINE=all WHISPER_HUB_ENGINE=whisperx
 e2e-engines: image-e2e image-reference
 	for e in faster_whisper openai_whisper whisperx all; do $(MAKE) image ENGINE=$$e || exit 1; done
 	for e in faster_whisper openai_whisper whisperx; do \
-		ENGINE=$$e ASR_ENGINE= deploy/e2e/stack.sh real && ENGINE=$$e ASR_ENGINE= REF_TWICE=$$([ $$e = openai_whisper ] && echo 1) deploy/e2e/fidelity.sh || exit 1; done
-	for a in "" faster_whisper openai_whisper whisperx; do ENGINE=all ASR_ENGINE=$$a deploy/e2e/stack.sh real || exit 1; done
+		ENGINE=$$e WHISPER_HUB_ENGINE= deploy/e2e/stack.sh real && ENGINE=$$e WHISPER_HUB_ENGINE= REF_TWICE=$$([ $$e = openai_whisper ] && echo 1) deploy/e2e/fidelity.sh || exit 1; done
+	for a in "" faster_whisper openai_whisper whisperx; do ENGINE=all WHISPER_HUB_ENGINE=$$a deploy/e2e/stack.sh real || exit 1; done
 	deploy/e2e/packages.sh
 
 clean:

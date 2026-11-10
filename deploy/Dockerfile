@@ -6,8 +6,8 @@
 #   docker build -f deploy/Dockerfile -t whisper-hub:faster_whisper .
 #   docker build -f deploy/Dockerfile --build-arg ENGINE=openai_whisper -t whisper-hub:openai_whisper .
 # ENGINE: faster_whisper (default, no torch) | whisperx | openai_whisper | all | fake
-# "all" installs the three real engines; ASR_ENGINE picks one at startup and
-# defaults to openai_whisper there, as upstream.
+# "all" installs the three real engines; WHISPER_HUB_ENGINE picks one at
+# startup and defaults to openai_whisper there, as upstream.
 #
 # The gateway is PID 1 and starts the worker as its child (worker.command):
 # signals reach the process that knows the shutdown order, and the
@@ -50,9 +50,9 @@ COPY --from=ffmpeg /usr/local/bin/ffmpeg /usr/local/bin/ffmpeg
 COPY --from=gateway /out/whisper-hub /usr/local/bin/whisper-hub
 RUN ln -s whisper-hub /usr/local/bin/whisper-asr-webservice && mkdir -p /data
 
-# ASR_ENGINE is deliberately not set: unset means "this image's engine"
-# (upstream defaults to openai_whisper), and a different value fails at
-# startup naming the image that has it.
+# WHISPER_HUB_ENGINE is deliberately not set: unset means "this image's
+# engine" (upstream defaults to openai_whisper), and a different value
+# fails at startup naming the image that has it.
 # The worker port is internal and unusual so an upstream-style
 # "--port 9100" cannot collide with it. The model loads at startup, as
 # upstream does.
@@ -60,9 +60,9 @@ ENV WHISPER_HUB_WORKER_COMMAND="[python, -m, whisper_worker]" \
     WHISPER_HUB_WORKER_ENGINE=${ENGINE} \
     WHISPER_HUB_WORKER_IMAGE_TAG="whisper-hub:%s" \
     WHISPER_HUB_HUB_WORKERS="[{url: \"http://127.0.0.1:19100\"}]" \
-    WORKER_HOST=127.0.0.1 \
-    WORKER_PORT=19100 \
-    WORKER_PRELOAD=true \
+    WHISPER_HUB_ENGINE_HOST=127.0.0.1 \
+    WHISPER_HUB_ENGINE_PORT=19100 \
+    WHISPER_HUB_ENGINE_PRELOAD=true \
     WHISPER_HUB_HUB_RETRY_MAX=2s
 
 # Usage totals persist to /data/usage.json without any configuration; an

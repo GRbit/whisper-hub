@@ -46,7 +46,7 @@ Contents: [Quick start](#quick-start) -
 Run the all-in-one image and transcribe a file:
 
 ```bash
-docker run -d --name whisper -p 9000:9000 -p 10300:10300 -e ASR_MODEL=base \
+docker run -d --name whisper -p 9000:9000 -p 10300:10300 -e WHISPER_HUB_ENGINE_MODEL=base \
   -v whisper-cache:/root/.cache -v whisper-usage:/data ghcr.io/grbit/whisper-hub:edge
 curl -F "audio_file=@meeting.mp3" "http://localhost:9000/asr?output=txt"
 ```
@@ -83,7 +83,7 @@ CI publishes these images to `ghcr.io/grbit/`, for linux/amd64 only:
 | `whisper-hub:faster_whisper` | 0.8 GB | all-in-one: gateway + faster_whisper worker (no torch). The default variant |
 | `whisper-hub:openai_whisper` | 2.7 GB | all-in-one: gateway + openai_whisper worker |
 | `whisper-hub:whisperx` | 3.7 GB | all-in-one: gateway + whisperx worker |
-| `whisper-hub:all` | 4.0 GB | all-in-one: gateway + all three engines; `ASR_ENGINE` picks one at startup |
+| `whisper-hub:all` | 4.0 GB | all-in-one: gateway + all three engines; `WHISPER_HUB_ENGINE` picks one at startup |
 | `whisper-hub:<engine>-gpu` | about 7 GB (faster_whisper) to 15 GB (all) | CUDA builds of the four above, see [GPU](#gpu) |
 | `whisper-hub-gateway` | 150 MB | gateway only, for the [split setup](#split-setup); runs as uid 65532 |
 | `whisper-hub-worker:<engine>` | | worker only, for the split setup: `faster_whisper` (the default variant), `openai_whisper`, `whisperx`, and the model-free `fake` used in tests. See [worker/README.md](worker/README.md) |
@@ -132,13 +132,13 @@ prints the branch or tag name and the full commit hash it was built from.
 ### Choosing the engine
 
 - **By image**: `whisper-hub:faster_whisper`, `:openai_whisper` or
-  `:whisperx`. These are smaller. With `ASR_ENGINE` unset the image runs its
-  own engine. This differs from upstream, whose single image defaults to
+  `:whisperx`. These are smaller. With `WHISPER_HUB_ENGINE` unset the image
+  runs its own engine. This differs from upstream, whose single image defaults to
   `openai_whisper`. Asking for an engine the image does not contain fails at
   startup with a message naming the image to use.
-- **By `ASR_ENGINE` on `whisper-hub:all`**: exactly as upstream. One image
-  holds every engine and an unset `ASR_ENGINE` means `openai_whisper`. One
-  engine runs per container start.
+- **By `WHISPER_HUB_ENGINE` on `whisper-hub:all`**: exactly as upstream.
+  One image holds every engine and an unset `WHISPER_HUB_ENGINE` means
+  `openai_whisper`. One engine runs per container start.
 
 ### GPU
 
@@ -147,14 +147,14 @@ NVIDIA Container Toolkit on the host:
 
 ```bash
 docker run -d --gpus all -p 9000:9000 -p 10300:10300 \
-  -e ASR_MODEL=large-v3 -e ASR_QUANTIZATION=float16 \
+  -e WHISPER_HUB_ENGINE_MODEL=large-v3 -e WHISPER_HUB_ENGINE_QUANTIZATION=float16 \
   -v whisper-cache:/root/.cache -v whisper-usage:/data ghcr.io/grbit/whisper-hub:edge-faster_whisper-gpu
 ```
 
-As upstream: `ASR_DEVICE` defaults to `cuda` when a GPU is visible and to
-`cpu` otherwise; `ASR_QUANTIZATION` defaults to `float32` with CUDA and to
-`int8` without (`float16` or `int8_float16` are the usual choices on a GPU).
-`whisper-hub:all-gpu` takes `ASR_ENGINE` like `whisper-hub:all`. With
+As upstream: `WHISPER_HUB_ENGINE_DEVICE` defaults to `cuda` when a GPU is
+visible and to `cpu` otherwise; `WHISPER_HUB_ENGINE_QUANTIZATION` defaults
+to `float32` with CUDA and to `int8` without (`float16` or `int8_float16` are the usual choices on a GPU).
+`whisper-hub:all-gpu` takes `WHISPER_HUB_ENGINE` like `whisper-hub:all`. With
 compose, add `deploy.resources.reservations.devices` with
 `capabilities: [gpu]` to the service.
 
@@ -219,10 +219,9 @@ path in upper case with `_` between the parts.
 | `auth.protected_paths` | `WHISPER_HUB_AUTH_PROTECTED_PATHS=/asr,/v1/` (comma separated list) |
 | `wyoming.enabled` | `WHISPER_HUB_WYOMING_ENABLED=false` |
 
-The environment variables of upstream are accepted as well, see
-[Migrating](#migrating-from-whisper-asr-webservice). When both an upstream
-variable and a `WHISPER_HUB_` variable set the same thing, the
-`WHISPER_HUB_` one wins.
+The variable names of an upstream deployment are accepted as aliases, see
+[Migrating](#migrating-from-whisper-asr-webservice). When both an alias and
+a `WHISPER_HUB_` variable set the same thing, the `WHISPER_HUB_` one wins.
 
 The sections of the file:
 
@@ -236,10 +235,12 @@ The sections of the file:
 | `legacy`, `openai`, `wyoming` | the three protocols |
 | `worker` | the worker process the gateway starts itself; the all-in-one images set it |
 
-Worker settings (`ASR_MODEL`, `ASR_QUANTIZATION`, `WORKER_MODELS`, ...) are
+Worker settings (`WHISPER_HUB_ENGINE`, `WHISPER_HUB_ENGINE_MODEL`,
+`WHISPER_HUB_ENGINE_QUANTIZATION`, `WHISPER_HUB_ENGINE_MODELS`, ...) are
 environment variables of the worker, listed in
-[worker/README.md](worker/README.md). In the all-in-one image, set them on
-the container: the worker inherits its environment.
+[worker/README.md](worker/README.md). They all start with
+`WHISPER_HUB_ENGINE`, a name no gateway setting derives. In the all-in-one
+image, set them on the container: the worker inherits its environment.
 
 ### Command line
 
@@ -556,22 +557,32 @@ authenticate; read the totals file instead.
 ## Migrating from whisper-asr-webservice
 
 Replace the image; keep the environment, the flags, the port and the cache
-volume:
+volume. whisper-hub's own names all start with `WHISPER_HUB_`; the names an
+upstream deployment already uses are accepted as compatibility aliases, so
+it keeps working unchanged. This table is the complete list. When both the
+`WHISPER_HUB_` name and its alias are set, the `WHISPER_HUB_` name wins; an
+empty value counts as unset for the worker's settings.
 
-| Upstream | whisper-hub |
-|---|---|
-| `--host`/`-h`, `--port`/`-p` | the HTTP listener. The container command may still be `whisper-asr-webservice ...` |
-| `ASR_ENGINE` | on `whisper-hub:all` exactly as upstream (unset = `openai_whisper`); on a single-engine image it must match the image (unset = the image's engine) |
-| `ASR_MODEL`, `ASR_MODEL_PATH`, `ASR_DEVICE`, `ASR_QUANTIZATION`, `MODEL_IDLE_TIMEOUT`, `HF_TOKEN`, `SUBTITLE_*` | passed to the worker, same meaning |
-| `LOG_LEVEL` | applies to both processes (`WARNING` becomes warn, `CRITICAL` becomes error in the gateway) |
-| `UPLOAD_SPOOL_DIR`, `DEBUG_FAILED_UPLOADS_DIR` | the gateway's spool directory for uploads and its dumps of uploads that fail to decode (`audio.spool_dir`, `audio.failed_uploads_dir`) |
-| `SAMPLE_RATE` | `legacy.raw_sample_rate`: the sample rate of `encode=false` uploads |
-| `/root/.cache` volume | same path, reused |
+| Upstream name (alias) | whisper-hub name | Meaning |
+|---|---|---|
+| `ASR_ENGINE` | `WHISPER_HUB_ENGINE` | the engine. On `whisper-hub:all` exactly as upstream (unset = `openai_whisper`); on a single-engine image it must match the image (unset = the image's engine) |
+| `ASR_MODEL` | `WHISPER_HUB_ENGINE_MODEL` | the model, same meaning |
+| `ASR_MODEL_PATH` | `WHISPER_HUB_ENGINE_MODEL_PATH` | where models are downloaded to |
+| `ASR_DEVICE` | `WHISPER_HUB_ENGINE_DEVICE` | `cuda` or `cpu` |
+| `ASR_QUANTIZATION` | `WHISPER_HUB_ENGINE_QUANTIZATION` | the compute type |
+| `MODEL_IDLE_TIMEOUT` | `WHISPER_HUB_ENGINE_MODEL_IDLE_TIMEOUT` | seconds before an unused model is unloaded |
+| `SUBTITLE_MAX_LINE_WIDTH`, `SUBTITLE_MAX_LINE_COUNT`, `SUBTITLE_HIGHLIGHT_WORDS` | `WHISPER_HUB_ENGINE_SUBTITLE_MAX_LINE_WIDTH`, `..._MAX_LINE_COUNT`, `..._HIGHLIGHT_WORDS` | whisperx subtitle output |
+| `LOG_LEVEL` | `WHISPER_HUB_LOG_LEVEL` (`log.level`) | both processes; each accepts `debug`, `info`, `warn` or `warning`, `error`, `critical`, in any case |
+| `UPLOAD_SPOOL_DIR` | `WHISPER_HUB_AUDIO_SPOOL_DIR` (`audio.spool_dir`) | the gateway's spool directory for uploads |
+| `DEBUG_FAILED_UPLOADS_DIR` | `WHISPER_HUB_AUDIO_FAILED_UPLOADS_DIR` (`audio.failed_uploads_dir`) | dumps of uploads that fail to decode |
+| `SAMPLE_RATE` | `WHISPER_HUB_LEGACY_RAW_SAMPLE_RATE` (`legacy.raw_sample_rate`) | the sample rate of `encode=false` uploads |
+| `--host`/`-h`, `--port`/`-p` | the same flags | the HTTP listener. The container command may still be `whisper-asr-webservice ...` |
+| `/root/.cache` volume | the same path | reused |
 
-`LOG_LEVEL`, `UPLOAD_SPOOL_DIR` and `DEBUG_FAILED_UPLOADS_DIR` are not
-variables of upstream 1.10.0; they come from the patched build described
-under [Compatibility](#compatibility) and are accepted for deployments that
-used it.
+`HF_TOKEN` keeps its name: it belongs to Hugging Face. `LOG_LEVEL`,
+`UPLOAD_SPOOL_DIR` and `DEBUG_FAILED_UPLOADS_DIR` are not variables of
+upstream 1.10.0; they come from a patched upstream build and are accepted
+for deployments that used it.
 
 ## Compatibility
 
@@ -630,9 +641,10 @@ reference's responses and report anything else as a difference:
    readable from a seekable file), so MP3 transcripts can differ slightly
    from upstream's. WAV, Ogg and the other formats decode to the same
    samples either way.
-6. Settings upstream does not have: `LOG_LEVEL`, `UPLOAD_SPOOL_DIR`,
-   `DEBUG_FAILED_UPLOADS_DIR`, and Hugging Face URLs in `ASR_MODEL`
-   (faster_whisper and whisperx).
+6. Settings upstream 1.10.0 does not have: the log level, the spool
+   directory and the dumps of failed uploads (the aliases of a patched
+   upstream build are in the [drop-in table](#migrating-from-whisper-asr-webservice)),
+   and Hugging Face URLs as the model (faster_whisper and whisperx).
 
 ### Known differences
 
@@ -643,7 +655,7 @@ Legacy API, besides the extensions above:
   yet. `/healthz` is new.
 - There is no `Server: uvicorn` header, and header names are in canonical
   case.
-- On the single-engine images, an unset `ASR_ENGINE` means the image's
+- On the single-engine images, an unset `WHISPER_HUB_ENGINE` means the image's
   engine, not `openai_whisper` (`whisper-hub:all` behaves as upstream).
 - whisperx with `initial_prompt` works; upstream answers 500, because its
   whisperx version rejects the argument.
@@ -694,7 +706,7 @@ Wyoming:
 
 - **Logs** go to stderr: one Info line per job (see
   [Usage accounting](#usage-accounting)), and every step at Debug
-  (`log.level: debug` or `LOG_LEVEL=DEBUG`). In the all-in-one image the
+  (`log.level: debug` or `WHISPER_HUB_LOG_LEVEL=debug`). In the all-in-one image the
   worker writes its own lines into the same stream.
 - **`SIGTERM`, `SIGINT`**: stop accepting, let running requests finish for
   `http.shutdown_grace` (30s), then cut them off (which also stops their

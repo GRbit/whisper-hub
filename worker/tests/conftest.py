@@ -45,7 +45,7 @@ class Worker:
     def __init__(self, env):
         import uvicorn
 
-        base = {"ASR_ENGINE": "fake", "ASR_MODEL": "tiny", "LOG_LEVEL": "DEBUG"}
+        base = {"WHISPER_HUB_ENGINE": "fake", "WHISPER_HUB_ENGINE_MODEL": "tiny", "WHISPER_HUB_LOG_LEVEL": "DEBUG"}
         base.update(env)
         cfg = from_env(base)
         with socket.socket() as s:

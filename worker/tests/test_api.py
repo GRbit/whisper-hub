@@ -22,7 +22,7 @@ def test_healthz(worker):
 
 
 def test_info(worker_factory):
-    w = worker_factory(WORKER_MODELS="tiny,base")
+    w = worker_factory(WHISPER_HUB_ENGINE_MODELS="tiny,base")
     status, info = w.get("/v1/info")
     assert status == 200
     assert info["engine"] == "fake"
@@ -75,7 +75,7 @@ def test_audio_part_with_filename_is_accepted(worker):
 
 
 def test_segments_directive_and_env_default(worker_factory):
-    w = worker_factory(WORKER_FAKE_SEGMENTS=5, WORKER_FAKE_LANGUAGE="fr")
+    w = worker_factory(WHISPER_HUB_ENGINE_FAKE_SEGMENTS=5, WHISPER_HUB_ENGINE_FAKE_LANGUAGE="fr")
     _, _, events = w.post("/v1/transcribe", {})
     assert len([e for e in events if e["type"] == "segment"]) == 5
     assert events[0]["language"] == "fr"
@@ -185,7 +185,7 @@ def test_jobs_for_one_model_run_one_at_a_time(worker):
 
 
 def test_detect_language(worker_factory):
-    w = worker_factory(WORKER_FAKE_LANGUAGE="de")
+    w = worker_factory(WHISPER_HUB_ENGINE_FAKE_LANGUAGE="de")
     status, _, body = w.post("/v1/detect-language", {"model": None})
     assert status == 200
     assert body == {"language": "de", "confidence": 0.99, "model": "tiny", "engine": "fake"}
@@ -199,7 +199,7 @@ def test_unknown_route_and_method(worker):
 
 
 def test_max_loaded_models_evicts_least_recently_used(worker_factory):
-    w = worker_factory(WORKER_MODELS="tiny,base,small", WORKER_MAX_LOADED_MODELS=2)
+    w = worker_factory(WHISPER_HUB_ENGINE_MODELS="tiny,base,small", WHISPER_HUB_ENGINE_MAX_LOADED_MODELS=2)
     for m in ("tiny", "base", "small"):
         assert w.post("/v1/transcribe", {"model": m})[0] == 200
     loaded = {m["id"]: m["loaded"] for m in w.get("/v1/info")[1]["models"]}
@@ -207,7 +207,7 @@ def test_max_loaded_models_evicts_least_recently_used(worker_factory):
 
 
 def test_idle_models_unload(worker_factory):
-    w = worker_factory(MODEL_IDLE_TIMEOUT=1)
+    w = worker_factory(WHISPER_HUB_ENGINE_MODEL_IDLE_TIMEOUT=1)
     assert w.post("/v1/transcribe", {})[0] == 200
     assert w.get("/v1/info")[1]["models"][0]["loaded"] is True
     deadline = time.monotonic() + 5
@@ -219,7 +219,7 @@ def test_idle_models_unload(worker_factory):
 
 
 def test_preload(worker_factory):
-    w = worker_factory(WORKER_PRELOAD="true")
+    w = worker_factory(WHISPER_HUB_ENGINE_PRELOAD="true")
     assert w.get("/v1/info")[1]["models"][0]["loaded"] is True
 
 

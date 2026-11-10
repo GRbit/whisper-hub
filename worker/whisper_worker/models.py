@@ -2,8 +2,8 @@
 
 Each model runs one job at a time (an asyncio lock per model, so waiting
 jobs cost no thread). Models load lazily, are evicted least recently used
-when WORKER_MAX_LOADED_MODELS is reached, and unload after
-MODEL_IDLE_TIMEOUT seconds without use.
+when WHISPER_HUB_ENGINE_MAX_LOADED_MODELS is reached, and unload after
+WHISPER_HUB_ENGINE_MODEL_IDLE_TIMEOUT seconds without use.
 """
 
 import asyncio

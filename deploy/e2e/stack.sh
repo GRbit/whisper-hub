@@ -3,7 +3,7 @@
 #   deploy/e2e/stack.sh fake   gateway image + Python fake worker image: protocols,
 #                              streaming, cancellation, priority (usage log), auth on and off
 #   deploy/e2e/stack.sh real   all-in-one image, model tiny on CPU, real audio. ENGINE picks
-#                              the image (whisper-hub:$ENGINE), ASR_ENGINE is passed to it if set.
+#                              the image (whisper-hub:$ENGINE), WHISPER_HUB_ENGINE is passed to it if set.
 # Images: GATEWAY_IMAGE, WORKER_IMAGE, AIO_IMAGE, E2E_IMAGE (built by make).
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
@@ -12,8 +12,8 @@ mode="${1:?usage: stack.sh fake|real}"
 gateway_image="${GATEWAY_IMAGE:-whisper-hub-gateway:latest}"
 worker_image="${WORKER_IMAGE:-whisper-hub-worker:fake}"
 aio_image="${AIO_IMAGE:-whisper-hub:${ENGINE:-faster_whisper}}"
-aio_env=(-e ASR_MODEL=tiny)
-[ -n "${ASR_ENGINE:-}" ] && aio_env+=(-e "ASR_ENGINE=$ASR_ENGINE")
+aio_env=(-e WHISPER_HUB_ENGINE_MODEL=tiny)
+[ -n "${WHISPER_HUB_ENGINE:-}" ] && aio_env+=(-e "WHISPER_HUB_ENGINE=$WHISPER_HUB_ENGINE")
 e2e_image="${E2E_IMAGE:-whisper-hub-e2e:latest}"
 cache_volume="${CACHE_VOLUME:-whub-e2e-cache}"
 # A directory with english-front-center.wav and german-20s.wav (see AGENTS.md);
@@ -77,7 +77,7 @@ chmod 644 "$work/users.yaml"
 status=0
 if [ "$mode" = fake ]; then
 	docker run -d --name whub-s-worker --network "$net" "$worker_image" >/dev/null
-	gw_env=(-e 'WHISPER_HUB_HUB_WORKERS=[{url: "http://whub-s-worker:9100"}]' -e LOG_LEVEL=DEBUG)
+	gw_env=(-e 'WHISPER_HUB_HUB_WORKERS=[{url: "http://whub-s-worker:9100"}]' -e WHISPER_HUB_LOG_LEVEL=debug)
 	docker run -d --name whub-s-gw --network "$net" -v "$work/data:/data" "${gw_env[@]}" \
 		-e WHISPER_HUB_AUTH_USAGE_LOG_FILE=/data/requests.jsonl "$gateway_image" >/dev/null
 	docker run -d --name whub-s-gw-auth --network "$net" -v "$work:/work:ro" "${gw_env[@]}" \
@@ -117,7 +117,7 @@ else
 	wait_healthy whub-s-aio 9000
 	# The engine actually running, from the gateway's "worker up" line.
 	running="$(docker logs whub-s-aio 2>&1 | grep 'msg="worker up"' | grep -o 'engine=[a-z_]*' | head -1)"
-	echo "== all-in-one $aio_image ${ASR_ENGINE:+ASR_ENGINE=$ASR_ENGINE }-> $running, model tiny"
+	echo "== all-in-one $aio_image ${WHISPER_HUB_ENGINE:+WHISPER_HUB_ENGINE=$WHISPER_HUB_ENGINE }-> $running, model tiny"
 	check --mode real --http http://whub-s-aio:9000 --wyoming whub-s-aio:10300 || status=1
 	docker rm -f whub-s-aio >/dev/null
 fi

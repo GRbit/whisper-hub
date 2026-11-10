@@ -814,6 +814,7 @@ func TestManagedWorker(t *testing.T) {
 	}
 
 	cfgErr := map[string]string{"WHISPER_HUB_WORKER_COMMAND": "[true]", "WHISPER_HUB_WORKER_ENGINE": "faster_whisper"}
+	// The upstream name on purpose: a drop-in deployment selects the engine so.
 	t.Setenv("ASR_ENGINE", "openai_whisper")
 	env := map[string]string{"WHISPER_HUB_HTTP_LISTEN": "127.0.0.1:0", "WHISPER_HUB_WYOMING_ENABLED": "false",
 		"WHISPER_HUB_HUB_WORKERS": fmt.Sprintf("[{url: %q}]", w.URL)}

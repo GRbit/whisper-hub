@@ -32,7 +32,7 @@ fakeworker() { # name script
 }
 gateway() { # name worker-name env...
 	local name=$1 worker=$2; shift 2
-	local envs=(-e "WHISPER_HUB_HUB_WORKERS=[{url: \"http://$worker:9100\"}]" -e LOG_LEVEL=DEBUG)
+	local envs=(-e "WHISPER_HUB_HUB_WORKERS=[{url: \"http://$worker:9100\"}]" -e WHISPER_HUB_LOG_LEVEL=debug)
 	for e in "$@"; do envs+=(-e "$e"); done
 	docker run -d --name "$name" --network "$net" -v "$work:/work:ro" "${envs[@]}" "$image" >/dev/null
 }

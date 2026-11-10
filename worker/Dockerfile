@@ -28,7 +28,7 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 
 COPY whisper_worker/ whisper_worker/
 
-ENV ASR_ENGINE=${ENGINE}
+ENV WHISPER_HUB_ENGINE=${ENGINE}
 EXPOSE 9100
 ENTRYPOINT ["python", "-m", "whisper_worker"]
 

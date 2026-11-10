@@ -3,22 +3,22 @@
 Behavior (documented in worker/README.md, keep both in sync):
 
 - Segment i (0-based) has id i+1, seek i*200, start 2*i, end 2*i+2 and the
-  text TEXTS[i % 3]. WORKER_FAKE_SEGMENTS (default 3) sets the count.
+  text TEXTS[i % 3]. WHISPER_HUB_ENGINE_FAKE_SEGMENTS (default 3) sets the count.
 - Language: options.language when given (probability 1.0), otherwise
-  WORKER_FAKE_LANGUAGE (default "en", probability 0.99). task is ignored.
+  WHISPER_HUB_ENGINE_FAKE_LANGUAGE (default "en", probability 0.99). task is ignored.
 - word_timestamps: each segment gets words split on spaces, spread evenly
   over the segment, probability 0.9. Otherwise words is null.
 - legacy_output renders exactly like upstream faster_whisper would for the
   same segments.
-- WORKER_FAKE_DELAY seconds are waited before each segment (cancellable).
+- WHISPER_HUB_ENGINE_FAKE_DELAY seconds are waited before each segment (cancellable).
 - A prompt starting with "fake:" holds directives instead of a prompt,
   separated by commas or spaces:
-    delay=<seconds>   override WORKER_FAKE_DELAY
-    segments=<n>      override WORKER_FAKE_SEGMENTS
+    delay=<seconds>   override WHISPER_HUB_ENGINE_FAKE_DELAY
+    segments=<n>      override WHISPER_HUB_ENGINE_FAKE_SEGMENTS
     fail=bad_request|model_not_found|unavailable|internal
                       fail before any output (HTTP error)
     fail_after=<n>    emit n segments, then an error event (code internal)
-- /v1/detect-language returns WORKER_FAKE_LANGUAGE with confidence 0.99.
+- /v1/detect-language returns WHISPER_HUB_ENGINE_FAKE_LANGUAGE with confidence 0.99.
 """
 
 import logging

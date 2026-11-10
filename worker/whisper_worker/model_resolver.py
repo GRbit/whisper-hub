@@ -1,4 +1,4 @@
-"""Hugging Face URL support for ASR_MODEL / WORKER_MODELS.
+"""Hugging Face URL support for WHISPER_HUB_ENGINE_MODEL / WHISPER_HUB_ENGINE_MODELS.
 
 A whisper-hub extension: upstream whisper-asr-webservice takes model names
 and local paths only. MIT License, Copyright (c) 2022 Ahmet Oner & Besim
@@ -57,7 +57,7 @@ def _pick_subdir(repo_id: str, files: list, quantization: str) -> str:
     if not dirs:
         raise ValueError(
             f"No CTranslate2 weights (model.bin) found in {repo_id}. "
-            "Convert the model with ct2-transformers-converter and point ASR_MODEL at the result."
+            "Convert the model with ct2-transformers-converter and point WHISPER_HUB_ENGINE_MODEL at the result."
         )
     if "" in dirs:
         return ""
@@ -69,13 +69,13 @@ def _pick_subdir(repo_id: str, files: list, quantization: str) -> str:
     if len(matches) == 1:
         return matches[0]
     raise ValueError(
-        f"{repo_id} has several CTranslate2 variants {dirs} and ASR_QUANTIZATION={quantization!r} "
+        f"{repo_id} has several CTranslate2 variants {dirs} and WHISPER_HUB_ENGINE_QUANTIZATION={quantization!r} "
         f"does not select exactly one. Put the folder in the URL, e.g. https://huggingface.co/{repo_id}/tree/main/{dirs[0]}"
     )
 
 
 def resolve_model(name: str, cache_dir: str, quantization: str, token: Optional[str] = None) -> str:
-    """resolve_model turns ASR_MODEL into something faster-whisper can load.
+    """resolve_model turns WHISPER_HUB_ENGINE_MODEL into something faster-whisper can load.
 
     Hugging Face URLs are downloaded into cache_dir and returned as a local path; values
     without a scheme (model names, repo ids, local paths) are returned unchanged.
@@ -83,7 +83,7 @@ def resolve_model(name: str, cache_dir: str, quantization: str, token: Optional[
     if not is_hf_reference(name):
         # Any other URL would only fail later inside faster-whisper with a confusing error.
         if "://" in name:
-            raise ValueError(f"ASR_MODEL={name!r}: only huggingface.co URLs are supported")
+            raise ValueError(f"WHISPER_HUB_ENGINE_MODEL={name!r}: only huggingface.co URLs are supported")
         return name
 
     repo_id, revision, subdir = _parse(name)
@@ -95,5 +95,5 @@ def resolve_model(name: str, cache_dir: str, quantization: str, token: Optional[
     logger.info("Downloading %s (revision=%s, folder=%r) into %s", repo_id, revision or "main", subdir, cache_dir)
     root = snapshot_download(repo_id, revision=revision, allow_patterns=patterns, cache_dir=cache_dir, token=token)
     path = os.path.join(root, subdir) if subdir else root
-    logger.info("ASR_MODEL %s resolved to %s", name, path)
+    logger.info("WHISPER_HUB_ENGINE_MODEL %s resolved to %s", name, path)
     return path

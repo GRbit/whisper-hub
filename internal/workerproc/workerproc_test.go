@@ -16,38 +16,61 @@ var quiet = slog.New(slog.NewTextHandler(io.Discard, nil))
 func TestEnvEngineSelection(t *testing.T) {
 	c := Config{Engine: "faster_whisper"}
 	env, err := c.Env([]string{"PATH=/bin"})
-	if err != nil || !slices.Contains(env, "ASR_ENGINE=faster_whisper") {
-		t.Fatalf("unset ASR_ENGINE: %v %v", env, err)
+	if err != nil || !slices.Contains(env, "WHISPER_HUB_ENGINE=faster_whisper") {
+		t.Fatalf("unset engine: %v %v", env, err)
 	}
-	if env, err := c.Env([]string{"ASR_ENGINE=faster_whisper"}); err != nil || len(env) != 1 {
-		t.Fatalf("matching ASR_ENGINE: %v %v", env, err)
+	if env, err := c.Env([]string{"WHISPER_HUB_ENGINE=faster_whisper"}); err != nil || len(env) != 1 {
+		t.Fatalf("matching engine: %v %v", env, err)
 	}
-	_, err = c.Env([]string{"ASR_ENGINE=openai_whisper"})
-	if err == nil || !strings.Contains(err.Error(), "use the whisper-hub:openai_whisper or whisper-hub:all image") {
+	_, err = c.Env([]string{"WHISPER_HUB_ENGINE=openai_whisper"})
+	if err == nil || !strings.Contains(err.Error(), "use the whisper-hub:openai_whisper or whisper-hub:all image") ||
+		!strings.Contains(err.Error(), "WHISPER_HUB_ENGINE=openai_whisper") {
 		t.Fatalf("missing engine: %v", err)
 	}
-	_, err = Config{Engine: "faster_whisper", ImageTag: "whisper-hub:%s-gpu"}.Env([]string{"ASR_ENGINE=whisperx"})
+	_, err = Config{Engine: "faster_whisper", ImageTag: "whisper-hub:%s-gpu"}.Env([]string{"WHISPER_HUB_ENGINE=whisperx"})
 	if err == nil || !strings.Contains(err.Error(), "whisper-hub:whisperx-gpu") {
 		t.Fatalf("gpu tag: %v", err)
 	}
-	if _, err := c.Env([]string{"ASR_ENGINE=vosk"}); err == nil || !strings.Contains(err.Error(), "not an engine") {
+	if _, err := c.Env([]string{"WHISPER_HUB_ENGINE=vosk"}); err == nil || !strings.Contains(err.Error(), "not an engine") {
 		t.Fatalf("unknown engine: %v", err)
 	}
 	// The all-engines image behaves as upstream: unset means openai_whisper.
 	all := Config{Engine: EngineAll}
-	if env, err := all.Env(nil); err != nil || !slices.Equal(env, []string{"ASR_ENGINE=openai_whisper"}) {
+	if env, err := all.Env(nil); err != nil || !slices.Equal(env, []string{"WHISPER_HUB_ENGINE=openai_whisper"}) {
 		t.Fatalf("all, unset: %v %v", env, err)
 	}
 	for _, e := range []string{"faster_whisper", "whisperx", "openai_whisper"} {
-		if _, err := all.Env([]string{"ASR_ENGINE=" + e}); err != nil {
+		if _, err := all.Env([]string{"WHISPER_HUB_ENGINE=" + e}); err != nil {
 			t.Fatalf("all, %s: %v", e, err)
 		}
 	}
-	if _, err := all.Env([]string{"ASR_ENGINE=fake"}); err == nil {
+	if _, err := all.Env([]string{"WHISPER_HUB_ENGINE=fake"}); err == nil {
 		t.Fatal("all image accepted the fake engine")
 	}
-	if env, err := (Config{}).Env([]string{"ASR_ENGINE=anything"}); err != nil || len(env) != 1 {
+	if env, err := (Config{}).Env([]string{"WHISPER_HUB_ENGINE=anything"}); err != nil || len(env) != 1 {
 		t.Fatalf("no engine configured: %v %v", env, err)
+	}
+}
+
+// A whisper-asr-webservice deployment selects the engine with ASR_ENGINE;
+// WHISPER_HUB_ENGINE wins when both are set.
+func TestEnvEngineAlias(t *testing.T) {
+	c := Config{Engine: "faster_whisper"}
+	if env, err := c.Env([]string{"ASR_ENGINE=faster_whisper"}); err != nil || len(env) != 1 {
+		t.Fatalf("alias: %v %v", env, err)
+	}
+	_, err := c.Env([]string{"ASR_ENGINE=openai_whisper"})
+	if err == nil || !strings.Contains(err.Error(), "ASR_ENGINE=openai_whisper, but this image") {
+		t.Fatalf("alias names itself in the error: %v", err)
+	}
+	if _, err := c.Env([]string{"ASR_ENGINE=openai_whisper", "WHISPER_HUB_ENGINE=faster_whisper"}); err != nil {
+		t.Fatalf("WHISPER_HUB_ENGINE does not win: %v", err)
+	}
+	if _, err := c.Env([]string{"ASR_ENGINE=faster_whisper", "WHISPER_HUB_ENGINE=openai_whisper"}); err == nil {
+		t.Fatal("WHISPER_HUB_ENGINE does not win over a matching alias")
+	}
+	if env, err := c.Env([]string{"WHISPER_HUB_ENGINE=", "ASR_ENGINE=faster_whisper"}); err != nil || len(env) != 2 {
+		t.Fatalf("empty counts as unset: %v %v", env, err)
 	}
 }
 
@@ -74,11 +97,11 @@ func TestExitIsReported(t *testing.T) {
 	p.Stop() // no-op after exit
 }
 
-// The worker must see the environment, with ASR_ENGINE filled in.
+// The worker must see the environment, with the engine filled in.
 func TestEnvReachesWorker(t *testing.T) {
 	out := filepath.Join(t.TempDir(), "env")
-	p, err := Start(Config{Engine: "fake", Command: []string{"sh", "-c", "echo \"$ASR_ENGINE $ASR_MODEL\" > " + out}},
-		[]string{"ASR_MODEL=tiny", "PATH=" + os.Getenv("PATH")}, quiet)
+	p, err := Start(Config{Engine: "fake", Command: []string{"sh", "-c", "echo \"$WHISPER_HUB_ENGINE $WHISPER_HUB_ENGINE_MODEL\" > " + out}},
+		[]string{"WHISPER_HUB_ENGINE_MODEL=tiny", "PATH=" + os.Getenv("PATH")}, quiet)
 	if err != nil {
 		t.Fatal(err)
 	}

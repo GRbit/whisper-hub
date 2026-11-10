@@ -3,7 +3,7 @@
 # it behaves the same exactly when every package of each single-engine
 # image is installed in it at the same version. This checks that, in
 # seconds, instead of rerunning the whole-stack fidelity comparison per
-# ASR_ENGINE value.
+# WHISPER_HUB_ENGINE value.
 #   deploy/e2e/packages.sh            ALL_IMAGE=whisper-hub:all, ENGINES="faster_whisper openai_whisper whisperx"
 # Exit status 1 lists every package missing from or differing in :all.
 set -euo pipefail

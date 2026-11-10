@@ -22,7 +22,7 @@ A change to the API has to be made in all three.
 
 ## Conventions
 
-- HTTP/1.1. The worker listens on `WORKER_HOST`:`WORKER_PORT`, by default
+- HTTP/1.1. The worker listens on `WHISPER_HUB_ENGINE_HOST`:`WHISPER_HUB_ENGINE_PORT`, by default
   `0.0.0.0:9100`. The all-in-one images use `127.0.0.1:19100`.
 - All JSON is UTF-8.
 - Audio is always raw PCM: signed 16-bit little-endian, mono, 16 kHz, no
@@ -45,7 +45,7 @@ error body described under [Errors](#errors).
 
 `200 {"status":"ok"}` as soon as the process accepts requests.
 
-With `WORKER_PRELOAD=true` the worker loads its default model before it
+With `WHISPER_HUB_ENGINE_PRELOAD=true` the worker loads its default model before it
 starts listening, so a successful `/healthz` then also means that the default
 model is in memory. Without preload the worker is healthy immediately and
 loads a model on the first job that needs it.
@@ -68,7 +68,7 @@ loads a model on the first job that needs it.
 | `engine` | `faster_whisper`, `whisperx`, `openai_whisper` or `fake` |
 | `version` | free-form text: the worker version, then the engine library versions |
 | `device` | the configured device, `cpu` or `cuda` |
-| `models` | the models this worker serves, in `WORKER_MODELS` order. Exactly one has `"default": true` (the first). `loaded` tells whether the model is in memory right now |
+| `models` | the models this worker serves, in `WHISPER_HUB_ENGINE_MODELS` order. Exactly one has `"default": true` (the first). `loaded` tells whether the model is in memory right now |
 | `languages` | the Whisper language codes; the full list is in `worker/whisper_worker/languages.py` |
 | `capabilities` | the optional features of the engine, see below |
 
@@ -252,11 +252,11 @@ the gateway goes by the status: 400 and 422 mean `bad_request`, 404
 - The gateway normally never makes a job wait there: it sends at most
   `max_in_flight` jobs per worker at once (default 1) and keeps the rest in
   its own priority queue.
-- A model is loaded on the first job that needs it, unless `WORKER_PRELOAD`
-  loaded the default model at startup. At most `WORKER_MAX_LOADED_MODELS`
+- A model is loaded on the first job that needs it, unless `WHISPER_HUB_ENGINE_PRELOAD`
+  loaded the default model at startup. At most `WHISPER_HUB_ENGINE_MAX_LOADED_MODELS`
   models are in memory; to load another one the worker unloads the idle model
   that was used least recently, or waits until one becomes idle.
-- With `MODEL_IDLE_TIMEOUT` greater than 0, a model that has not been used
+- With `WHISPER_HUB_ENGINE_MODEL_IDLE_TIMEOUT` greater than 0, a model that has not been used
   for that many seconds is unloaded.
 - A model that cannot be loaded fails the job with `503 unavailable`.
 

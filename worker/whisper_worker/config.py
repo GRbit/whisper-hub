@@ -1,7 +1,11 @@
 """Environment configuration.
 
-Upstream variable names keep their whisper-asr-webservice semantics
-(app/config.py there); settings added by whisper-hub use the WORKER_ prefix.
+Every setting has a WHISPER_HUB_ name: WHISPER_HUB_ENGINE and
+WHISPER_HUB_ENGINE_* for the engine worker (the gateway's configuration has
+no "engine" section, so these never collide with its derived variables),
+and WHISPER_HUB_LOG_LEVEL, shared with the gateway's log.level. The names
+of whisper-asr-webservice (app/config.py there) are accepted as aliases
+with their upstream semantics; the WHISPER_HUB_ name wins when both are set.
 """
 
 import os
@@ -53,61 +57,96 @@ class Config:
         return self.models[0]
 
 
+# ALIASES maps each WHISPER_HUB_ name to the whisper-asr-webservice name a
+# drop-in deployment may still use.
+ALIASES = {
+    "WHISPER_HUB_ENGINE": "ASR_ENGINE",
+    "WHISPER_HUB_ENGINE_MODEL": "ASR_MODEL",
+    "WHISPER_HUB_ENGINE_MODEL_PATH": "ASR_MODEL_PATH",
+    "WHISPER_HUB_ENGINE_DEVICE": "ASR_DEVICE",
+    "WHISPER_HUB_ENGINE_QUANTIZATION": "ASR_QUANTIZATION",
+    "WHISPER_HUB_ENGINE_MODEL_IDLE_TIMEOUT": "MODEL_IDLE_TIMEOUT",
+    "WHISPER_HUB_ENGINE_SUBTITLE_MAX_LINE_WIDTH": "SUBTITLE_MAX_LINE_WIDTH",
+    "WHISPER_HUB_ENGINE_SUBTITLE_MAX_LINE_COUNT": "SUBTITLE_MAX_LINE_COUNT",
+    "WHISPER_HUB_ENGINE_SUBTITLE_HIGHLIGHT_WORDS": "SUBTITLE_HIGHLIGHT_WORDS",
+    "WHISPER_HUB_LOG_LEVEL": "LOG_LEVEL",
+}
+
+# The gateway's log.level spellings, so one WHISPER_HUB_LOG_LEVEL serves both.
+_LEVEL_SPELLINGS = {"WARN": "WARNING", "FATAL": "CRITICAL"}
+
+
+def lookup(env: Mapping[str, str], name: str) -> "tuple[str, Optional[str]]":
+    """lookup returns the variable that sets name and its value.
+
+    An empty value counts as unset, so an empty WHISPER_HUB_ name falls
+    through to its alias and then to the default.
+    """
+    for key in (name, ALIASES.get(name)):
+        if key and env.get(key):
+            return key, env[key]
+    return name, None
+
+
 def _int(env: Mapping[str, str], name: str, default: int, minimum: Optional[int] = None) -> int:
-    raw = env.get(name)
-    if raw is None or raw == "":
+    key, raw = lookup(env, name)
+    if raw is None:
         return default
     try:
         value = int(raw)
     except ValueError:
-        raise ConfigError(f"{name}={raw!r} is not an integer") from None
+        raise ConfigError(f"{key}={raw!r} is not an integer") from None
     if minimum is not None and value < minimum:
-        raise ConfigError(f"{name}={raw!r} must be >= {minimum}")
+        raise ConfigError(f"{key}={raw!r} must be >= {minimum}")
     return value
 
 
 def _float(env: Mapping[str, str], name: str, default: float) -> float:
-    raw = env.get(name)
-    if raw is None or raw == "":
+    key, raw = lookup(env, name)
+    if raw is None:
         return default
     try:
         value = float(raw)
     except ValueError:
-        raise ConfigError(f"{name}={raw!r} is not a number") from None
+        raise ConfigError(f"{key}={raw!r} is not a number") from None
     if value < 0:
-        raise ConfigError(f"{name}={raw!r} must be >= 0")
+        raise ConfigError(f"{key}={raw!r} must be >= 0")
     return value
 
 
 def _bool(env: Mapping[str, str], name: str, default: bool) -> bool:
-    raw = env.get(name)
-    if raw is None or raw == "":
+    key, raw = lookup(env, name)
+    if raw is None:
         return default
     value = raw.strip().lower()
     if value in ("1", "true", "yes", "on"):
         return True
     if value in ("0", "false", "no", "off"):
         return False
-    raise ConfigError(f"{name}={raw!r} is not a boolean")
+    raise ConfigError(f"{key}={raw!r} is not a boolean")
+
+
+def _str(env: Mapping[str, str], name: str, default: str) -> str:
+    return lookup(env, name)[1] or default
 
 
 def from_env(env: Optional[Mapping[str, str]] = None, cuda_available: Callable[[], bool] = lambda: False) -> Config:
     """from_env builds a Config from environment variables.
 
-    cuda_available is only consulted for the upstream defaults of ASR_DEVICE
-    and ASR_QUANTIZATION; it is a callable so that the fake engine never has
+    cuda_available is only consulted for the upstream defaults of the device
+    and the quantization; it is a callable so that the fake engine never has
     to import an inference library.
     """
     env = os.environ if env is None else env
     c = Config()
 
-    c.engine = env.get("ASR_ENGINE", "openai_whisper")
+    c.engine = _str(env, "WHISPER_HUB_ENGINE", "openai_whisper")
     if c.engine not in ENGINES:
         raise ConfigError(f"Unsupported ASR engine: {c.engine}")
 
     c.hf_token = env.get("HF_TOKEN", "")
-    c.model = env.get("ASR_MODEL", "base")
-    c.model_path = env.get("ASR_MODEL_PATH", os.path.join(os.path.expanduser("~"), ".cache", "whisper"))
+    c.model = _str(env, "WHISPER_HUB_ENGINE_MODEL", "base")
+    c.model_path = _str(env, "WHISPER_HUB_ENGINE_MODEL_PATH", os.path.join(os.path.expanduser("~"), ".cache", "whisper"))
 
     cuda = None
 
@@ -117,38 +156,39 @@ def from_env(env: Optional[Mapping[str, str]] = None, cuda_available: Callable[[
             cuda = bool(cuda_available())
         return cuda
 
-    c.device = env.get("ASR_DEVICE") or ("cuda" if has_cuda() else "cpu")
-    # Upstream bases the quantization default on CUDA presence, not on ASR_DEVICE.
-    c.quantization = env.get("ASR_QUANTIZATION") or ("float32" if has_cuda() else "int8")
+    c.device = _str(env, "WHISPER_HUB_ENGINE_DEVICE", "") or ("cuda" if has_cuda() else "cpu")
+    # Upstream bases the quantization default on CUDA presence, not on the device.
+    c.quantization = _str(env, "WHISPER_HUB_ENGINE_QUANTIZATION", "") or ("float32" if has_cuda() else "int8")
     if c.quantization not in QUANTIZATIONS:
         raise ConfigError(
             "Invalid MODEL_QUANTIZATION. Choose 'float32', 'float16', or 'int8' "
             "(or another CTranslate2 compute type: 'bfloat16', 'int16', 'int8_float32', 'int8_float16', 'int8_bfloat16')."
         )
 
-    c.model_idle_timeout = _int(env, "MODEL_IDLE_TIMEOUT", 0)
-    c.log_level = env.get("LOG_LEVEL", "INFO").upper()
+    c.model_idle_timeout = _int(env, "WHISPER_HUB_ENGINE_MODEL_IDLE_TIMEOUT", 0)
+    key, level = lookup(env, "WHISPER_HUB_LOG_LEVEL")
+    level = (level or "INFO").strip().upper()
+    c.log_level = _LEVEL_SPELLINGS.get(level, level)
     if c.log_level not in LOG_LEVELS:
-        raise ConfigError(f"LOG_LEVEL={c.log_level!r}: choose one of {', '.join(LOG_LEVELS)}")
+        raise ConfigError(f"{key}={c.log_level!r}: choose one of {', '.join(LOG_LEVELS)}")
 
-    c.subtitle_max_line_width = _int(env, "SUBTITLE_MAX_LINE_WIDTH", 1000)
-    c.subtitle_max_line_count = _int(env, "SUBTITLE_MAX_LINE_COUNT", 2)
+    c.subtitle_max_line_width = _int(env, "WHISPER_HUB_ENGINE_SUBTITLE_MAX_LINE_WIDTH", 1000)
+    c.subtitle_max_line_count = _int(env, "WHISPER_HUB_ENGINE_SUBTITLE_MAX_LINE_COUNT", 2)
     # Upstream accepts only the literal "true" (any case); everything else is false.
-    c.subtitle_highlight_words = env.get("SUBTITLE_HIGHLIGHT_WORDS", "false").lower() == "true"
+    c.subtitle_highlight_words = _str(env, "WHISPER_HUB_ENGINE_SUBTITLE_HIGHLIGHT_WORDS", "false").lower() == "true"
 
-    c.host = env.get("WORKER_HOST", "0.0.0.0")
-    c.port = _int(env, "WORKER_PORT", 9100, minimum=1)
-    raw_models = env.get("WORKER_MODELS", "")
+    c.host = _str(env, "WHISPER_HUB_ENGINE_HOST", "0.0.0.0")
+    c.port = _int(env, "WHISPER_HUB_ENGINE_PORT", 9100, minimum=1)
     models = []
-    for m in raw_models.split(","):
+    for m in _str(env, "WHISPER_HUB_ENGINE_MODELS", "").split(","):
         m = m.strip()
         if m and m not in models:
             models.append(m)
     c.models = models or [c.model]
-    c.max_loaded_models = _int(env, "WORKER_MAX_LOADED_MODELS", 1, minimum=1)
-    c.preload = _bool(env, "WORKER_PRELOAD", False)
+    c.max_loaded_models = _int(env, "WHISPER_HUB_ENGINE_MAX_LOADED_MODELS", 1, minimum=1)
+    c.preload = _bool(env, "WHISPER_HUB_ENGINE_PRELOAD", False)
 
-    c.fake_segments = _int(env, "WORKER_FAKE_SEGMENTS", 3, minimum=0)
-    c.fake_delay = _float(env, "WORKER_FAKE_DELAY", 0.0)
-    c.fake_language = env.get("WORKER_FAKE_LANGUAGE", "en")
+    c.fake_segments = _int(env, "WHISPER_HUB_ENGINE_FAKE_SEGMENTS", 3, minimum=0)
+    c.fake_delay = _float(env, "WHISPER_HUB_ENGINE_FAKE_DELAY", 0.0)
+    c.fake_language = _str(env, "WHISPER_HUB_ENGINE_FAKE_LANGUAGE", "en")
     return c

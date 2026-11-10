@@ -122,11 +122,11 @@ class OpenAIWhisperEngine(Engine):
 
         if is_hf_reference(model_id):
             raise ValueError(
-                f"ASR_MODEL={model_id!r} is a Hugging Face reference, which openai_whisper cannot load. "
-                "Use ASR_ENGINE=faster_whisper or whisperx."
+                f"WHISPER_HUB_ENGINE_MODEL={model_id!r} is a Hugging Face reference, which openai_whisper cannot load. "
+                "Use WHISPER_HUB_ENGINE=faster_whisper or whisperx."
             )
         _install_progress_hook()
-        # Upstream picks CUDA by availability and ignores ASR_DEVICE for this engine.
+        # Upstream picks CUDA by availability and ignores WHISPER_HUB_ENGINE_DEVICE for this engine.
         if torch.cuda.is_available():
             return whisper.load_model(name=model_id, download_root=self.cfg.model_path).cuda()
         return whisper.load_model(name=model_id, download_root=self.cfg.model_path)

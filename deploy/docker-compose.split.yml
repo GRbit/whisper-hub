@@ -26,10 +26,10 @@ services:
       args:
         ENGINE: faster_whisper
     environment:
-      - ASR_MODEL=base
+      - WHISPER_HUB_ENGINE_MODEL=base
       # Several models from one worker; the first is the default:
-      # - WORKER_MODELS=base,small
-      - WORKER_PRELOAD=true
+      # - WHISPER_HUB_ENGINE_MODELS=base,small
+      - WHISPER_HUB_ENGINE_PRELOAD=true
     volumes:
       - cache-whisper:/root/.cache
     restart: unless-stopped
@@ -43,7 +43,7 @@ services:
   #     args:
   #       ENGINE: whisperx
   #   environment:
-  #     - ASR_MODEL=large-v3
+  #     - WHISPER_HUB_ENGINE_MODEL=large-v3
   #     - HF_TOKEN=${HF_TOKEN}   # enables diarization
   #   volumes:
   #     - cache-whisper:/root/.cache

@@ -9,8 +9,8 @@
 # WHISPER_HUB_HUB_QUEUE_LENGTH. Lists are comma separated, maps are
 # key=value pairs, hub.workers takes YAML flow syntax.
 # Precedence: defaults < this file < environment < command line flags.
-# Within the environment, WHISPER_HUB_* variables win over the variables of
-# whisper-asr-webservice (LOG_LEVEL, UPLOAD_SPOOL_DIR, ...).
+# Within the environment, WHISPER_HUB_* variables win over the names a
+# whisper-asr-webservice deployment uses (README, "Migrating").
 # An unknown key in this file is an error.
 
 http:
@@ -25,17 +25,19 @@ http:
   shutdown_grace: 30s
 
 log:
-  level: info # debug, info, warn, error (LOG_LEVEL also works)
+  # debug, info, warn, error. WHISPER_HUB_LOG_LEVEL also sets the level of
+  # the engine worker, which does not read this file.
+  level: info
   format: text # text or json
 
 audio:
   ffmpeg_path: ffmpeg
   # Uploads are spooled here for ffmpeg (seekable input is needed for M4A
   # with a trailing index). Default: the system temp directory. Point it at
-  # real disk when /tmp is a small tmpfs. Same as UPLOAD_SPOOL_DIR.
+  # real disk when /tmp is a small tmpfs.
   spool_dir: ""
   # Keep every upload that fails to decode, with ffmpeg output, for replay.
-  # Stores raw user audio: debugging only. Same as DEBUG_FAILED_UPLOADS_DIR.
+  # Stores raw user audio: debugging only.
   failed_uploads_dir: ""
 
 hub:
@@ -112,7 +114,7 @@ auth:
 legacy:
   # whisper-asr-webservice API: /asr, /detect-language, /docs, /openapi.json.
   max_upload_bytes: 0 # 0 = unlimited, as upstream
-  raw_sample_rate: 16000 # sample rate of encode=false uploads (SAMPLE_RATE)
+  raw_sample_rate: 16000 # sample rate of encode=false uploads
 
 openai:
   max_upload_bytes: 0 # 0 = unlimited
@@ -144,8 +146,8 @@ worker:
   # The engine worker the gateway starts and owns, as in the all-in-one
   # image (which sets these). Empty command: workers run elsewhere.
   command: [] # e.g. [python, -m, whisper_worker]
-  # Engine installed next to command. ASR_ENGINE unset -> this engine; a
-  # different ASR_ENGINE fails at startup and names the image to use.
+  # Engine installed next to command. WHISPER_HUB_ENGINE unset -> this
+  # engine; a different one fails at startup and names the image to use.
   engine: ""
   image_tag: "whisper-hub:%s"
   stop_timeout: 10s # SIGTERM -> SIGKILL

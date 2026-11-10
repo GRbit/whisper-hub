@@ -67,10 +67,10 @@ They run real containers. The scripts are in `deploy/e2e/`.
 | `make e2e-fidelity` | byte-for-byte comparison of legacy responses between the reference (built by `make image-reference`) and the all-in-one image, with whisper-hub's extensions applied explicitly | `VOICE_FILES`; network access to build the reference once; ffmpeg with AAC, MP3 and Opus encoders; python3 |
 | `make e2e-packages` | every Python package of the three single-engine images is installed in `whisper-hub:all` at the same version | the four images already built (`make image ENGINE=...`); python3 |
 | `make e2e` | `e2e-clients`, `e2e-fake`, `e2e-real`, `e2e-fidelity` | all of the above |
-| `make e2e-engines` | builds all four all-in-one images, then `e2e-real` and `e2e-fidelity` for each single-engine image, `e2e-real` for `whisper-hub:all` with every `ASR_ENGINE` value, and `e2e-packages` | all of the above, and a lot of time and disk |
+| `make e2e-engines` | builds all four all-in-one images, then `e2e-real` and `e2e-fidelity` for each single-engine image, `e2e-real` for `whisper-hub:all` with every `WHISPER_HUB_ENGINE` value, and `e2e-packages` | all of the above, and a lot of time and disk |
 
 `ENGINE=<engine>` selects the image for `e2e-real` and `e2e-fidelity`
-(`whisper-hub:$ENGINE`); `ASR_ENGINE`, when set, is passed to the container.
+(`whisper-hub:$ENGINE`); `WHISPER_HUB_ENGINE`, when set, is passed to the container.
 `REF_TWICE=1` makes the fidelity script first compare the reference with
 itself and label the cases where it is not deterministic; use it for
 openai_whisper.
@@ -148,7 +148,7 @@ Gateway (Go):
   upstream variables (`applyCompat`), `WHISPER_HUB_*`
   variables derived from the YAML paths (`env.go`), flags.
 - `internal/workerproc/` - the worker as a child process, and the
-  `ASR_ENGINE` check of the all-in-one images.
+  `WHISPER_HUB_ENGINE` check of the all-in-one images.
 
 Worker (Python, `worker/`):
 
@@ -223,6 +223,15 @@ models, queue or account: the middleware and the hub do. Only
   message that is safe to show to a client. Diagnostics (paths, subprocess
   output, library messages) go into the wrapped cause and the log, never
   into the message.
+- Environment variables of whisper-hub start with `WHISPER_HUB_`: the
+  gateway's are derived from the YAML paths, the worker's are
+  `WHISPER_HUB_ENGINE` and `WHISPER_HUB_ENGINE_<NAME>` (no YAML section may
+  be called `engine`), and `WHISPER_HUB_LOG_LEVEL` is read by both. The
+  names of upstream whisper-asr-webservice are accepted only as aliases
+  (`applyCompat`, `workerproc.EngineAlias`, `ALIASES` in
+  `worker/whisper_worker/config.py`), listed in the README's drop-in table;
+  our own files use the `WHISPER_HUB_` names, and the `WHISPER_HUB_` name
+  wins when both are set.
 - Packages do not read environment variables or files for configuration.
   They export a `Config` struct with `yaml` tags; the zero value of a field
   means its documented default.

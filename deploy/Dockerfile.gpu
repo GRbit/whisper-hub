@@ -47,15 +47,15 @@ COPY --from=ffmpeg /usr/local/bin/ffmpeg /usr/local/bin/ffmpeg
 COPY --from=gateway /out/whisper-hub /usr/local/bin/whisper-hub
 RUN ln -s whisper-hub /usr/local/bin/whisper-asr-webservice && mkdir -p /data
 
-# See deploy/Dockerfile for why ASR_ENGINE is not set and the worker port.
+# See deploy/Dockerfile for why WHISPER_HUB_ENGINE is not set and the worker port.
 ENV WHISPER_HUB_WORKER_COMMAND="[python, -m, whisper_worker]" \
     WHISPER_HUB_WORKER_ENGINE=${ENGINE} \
     WHISPER_HUB_WORKER_IMAGE_TAG="whisper-hub:%s-gpu" \
     WHISPER_HUB_HUB_WORKERS="[{url: \"http://127.0.0.1:19100\"}]" \
     WHISPER_HUB_HUB_RETRY_MAX=2s \
-    WORKER_HOST=127.0.0.1 \
-    WORKER_PORT=19100 \
-    WORKER_PRELOAD=true
+    WHISPER_HUB_ENGINE_HOST=127.0.0.1 \
+    WHISPER_HUB_ENGINE_PORT=19100 \
+    WHISPER_HUB_ENGINE_PRELOAD=true
 
 # See deploy/Dockerfile for the usage totals default.
 ENV WHISPER_HUB_AUTH_USAGE_DEFAULT_TOTALS_FILE=/data/usage.json

@@ -33,8 +33,8 @@ type Config struct {
 	// MaxUploadBytes caps the request body of /asr and /detect-language;
 	// larger requests get 413. Default 0: unlimited, as upstream.
 	MaxUploadBytes int64 `yaml:"max_upload_bytes"`
-	// RawSampleRate is the sample rate of encode=false uploads (upstream's
-	// SAMPLE_RATE). Default 16000.
+	// RawSampleRate is the sample rate of encode=false uploads. Default
+	// 16000.
 	RawSampleRate int `yaml:"raw_sample_rate"`
 }
 

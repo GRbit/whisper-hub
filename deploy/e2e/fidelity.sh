@@ -5,7 +5,7 @@
 # all-in-one image, same original uploads, encode=true, model tiny, int8.
 # fidelity.py lists whisper-hub's own extensions to upstream separately.
 #   VOICE_FILES=dir ENGINE=whisperx deploy/e2e/fidelity.sh       image whisper-hub:whisperx
-#   VOICE_FILES=dir ENGINE=all ASR_ENGINE=faster_whisper deploy/e2e/fidelity.sh
+#   VOICE_FILES=dir ENGINE=all WHISPER_HUB_ENGINE=faster_whisper deploy/e2e/fidelity.sh
 #   REF_TWICE=1 ...   first compare the reference with itself, so cases on
 #                     which upstream is not deterministic are labelled UNSTABLE
 # VOICE_FILES: a directory with english-front-center.wav and german-20s.wav
@@ -19,8 +19,8 @@ user_ref_image="${REF_IMAGE:-}"
 ref_image="${user_ref_image:-$REF_IMAGE}"
 image_engine="${ENGINE:-faster_whisper}"
 aio_image="${AIO_IMAGE:-whisper-hub:$image_engine}"
-# The engine under test: ASR_ENGINE, else the image's (all -> upstream's default).
-engine="${ASR_ENGINE:-$image_engine}"
+# The engine under test: WHISPER_HUB_ENGINE, else the image's (all -> upstream's default).
+engine="${WHISPER_HUB_ENGINE:-$image_engine}"
 [ "$engine" = all ] && engine=openai_whisper
 cache_volume="${CACHE_VOLUME:-whub-e2e-cache}"
 voice="${VOICE_FILES:-}"
@@ -68,6 +68,8 @@ json.dump(durations, open(sys.argv[1], "w"))
 open(sys.argv[2], "w").write(",".join(differs))
 PY
 
+# Both containers get upstream's variable names on purpose: the reference
+# knows no others, and whisper-hub must accept them as a drop-in.
 model=(-e ASR_MODEL=tiny -e ASR_QUANTIZATION=int8 -v "$cache_volume:/root/.cache")
 ref_extra=()
 if [ "$engine" = whisperx ]; then
@@ -77,14 +79,14 @@ if [ "$engine" = whisperx ]; then
 	ref_extra=(-v "$here/reference/sitecustomize.py:/refpatch/sitecustomize.py:ro" -e PYTHONPATH=/refpatch)
 fi
 hub_env=()
-[ -n "${ASR_ENGINE:-}" ] && hub_env=(-e "ASR_ENGINE=$ASR_ENGINE")
+[ -n "${WHISPER_HUB_ENGINE:-}" ] && hub_env=(-e "ASR_ENGINE=$WHISPER_HUB_ENGINE")
 docker run -d --name whub-fid-ref -p 127.0.0.1:19010:9000 \
 	-e "ASR_ENGINE=$engine" "${model[@]}" "${ref_extra[@]}" "$ref_image" >/dev/null
 docker run -d --name whub-fid-hub -p 127.0.0.1:19020:9000 "${model[@]}" "${hub_env[@]}" "$aio_image" >/dev/null
 for u in 19010/openapi.json 19020/healthz; do
 	for _ in $(seq 600); do curl -sf "http://127.0.0.1:$u" >/dev/null && break; sleep 2; done
 done
-echo "== fidelity: $aio_image ${ASR_ENGINE:+ASR_ENGINE=$ASR_ENGINE }vs $ref_image ($REF_URL at $REF_COMMIT) ASR_ENGINE=$engine"
+echo "== fidelity: $aio_image ${WHISPER_HUB_ENGINE:+ASR_ENGINE=$WHISPER_HUB_ENGINE }vs $ref_image ($REF_URL at $REF_COMMIT) ASR_ENGINE=$engine"
 args=(--engine "$engine")
 if [ -n "${REF_TWICE:-}" ]; then
 	echo "-- reference vs itself"
