@@ -38,7 +38,7 @@ Non-goals:
 | Term | Meaning |
 |---|---|
 | upstream | whisper-asr-webservice, the service whose API the legacy protocol reproduces |
-| reference | the exact build of upstream that whisper-hub is compared with byte for byte, see [Legacy compatibility](#legacy-compatibility) |
+| reference | public upstream at a pinned commit, built and run unmodified, that whisper-hub is compared with byte for byte, see [Legacy compatibility](#legacy-compatibility) |
 | sidecar | an authentication proxy that earlier deployments ran in front of upstream. whisper-hub replaces it and accepts its settings, users file and usage files |
 | engine | a speech recognition library: `faster_whisper`, `whisperx`, `openai_whisper`, or the model-free `fake` used in tests |
 | worker | a Python process that runs one engine and serves one or more models over the internal [worker API](worker-api.md) |
@@ -216,7 +216,7 @@ request is read and how the result is written.
 5. The worker returns the transcript already rendered in the requested
    format (`Result.Rendered`). The frontend writes these bytes unchanged,
    with upstream's headers: `Asr-Engine`, `Content-Disposition`,
-   `Content-Type: text/plain; charset=utf-8`, plus the reference's
+   `Content-Type: text/plain; charset=utf-8`, plus whisper-hub's own
    `X-Audio-Duration-Seconds`.
 
 `POST /detect-language` is the same with `DetectLanguage`; the JSON answer
@@ -275,8 +275,8 @@ The hub reports failures as error kinds; each frontend translates them:
 
 | Kind | Legacy | OpenAI | Wyoming |
 |---|---|---|---|
-| `bad_request` | 500 `{"detail":"Transcription failed"}` (the reference answers every engine exception this way) | 400 `invalid_request_error` | `error` event |
-| `bad_audio` | 400 with the reference's detail text | 400, `param` `file`, `code` `invalid_value` | `error` event |
+| `bad_request` | 500 `{"detail":"Transcription failed"}` (every engine exception is a 500, as upstream; the JSON detail is an extension) | 400 `invalid_request_error` | `error` event |
+| `bad_audio` | 400 with a redacted detail (an extension; upstream answers 500) | 400, `param` `file`, `code` `invalid_value` | `error` event |
 | `unauthenticated` | 401 with a Basic challenge | 401 `invalid_api_key` | `error` event at connect |
 | `forbidden` | 403 `{"detail": ...}` | 403 `model_not_allowed` | `error` event |
 | `model_not_found` | 404 `{"detail": ...}` | 404 `model_not_found` | `error` event |
@@ -450,21 +450,23 @@ healthy worker, `/healthz` answers 503 and jobs fail as `unavailable`.
 
 ### What it is measured against
 
-The reference is upstream as it stood after its 1.10.0 release, plus a small
-set of patches that the deployments whisper-hub was written to replace were
-running. The patches change what a client can observe in three ways:
+The reference is public upstream
+[whisper-asr-webservice](https://github.com/ahmetoner/whisper-asr-webservice),
+`main` at the commit in `deploy/e2e/reference/upstream.env` (release
+1.10.0). `make image-reference` builds it from that commit with upstream's
+own Dockerfile, and it runs as built, with its own `app/`. Anyone can
+rebuild it, and the image installs exactly the library versions the worker
+pins.
 
-- An upload that cannot be decoded is answered with
-  `400 {"detail": "<reason> (<size> bytes, magic=<first 12 bytes, hex>)"}`,
-  and an engine failure with `500 {"detail": "Transcription failed"}`.
-- `/asr` and `/detect-language` report the length of the decoded audio in an
-  `X-Audio-Duration-Seconds` header, and `/detect-language` also in an
-  `audio_duration_seconds` field.
-- Uploads are written to a spool file before decoding, so M4A files with the
-  index at the end decode correctly. This added the `UPLOAD_SPOOL_DIR`,
-  `DEBUG_FAILED_UPLOADS_DIR` and `LOG_LEVEL` variables.
-
-whisper-hub reproduces the reference, including these three.
+whisper-hub reproduces it, plus a short list of its own extensions: the
+audio duration in a header and in the `/detect-language` JSON, JSON details
+for engine failures, a redacted 400 for audio that does not decode or has no
+samples, decoding from a spool file instead of a pipe (MP4 with the index at
+the end decodes, MP3 encoder delay is trimmed), and the
+`LOG_LEVEL`, `UPLOAD_SPOOL_DIR` and `DEBUG_FAILED_UPLOADS_DIR` variables. The
+list, with what upstream answers instead, is in the
+[README](../README.md#extensions-to-upstream); the guards below apply
+exactly these extensions to upstream's responses, and nothing else.
 
 ### How identical output is achieved
 
@@ -474,11 +476,14 @@ framework around it. Each is matched separately.
 
 1. **Same audio.** The gateway images ship the exact ffmpeg build of the
    upstream image (`onerahmet/ffmpeg:n7.1`) and call it for the same output
-   format, so an upload decodes to the same samples.
+   format, so an upload decodes to the same samples, except where reading
+   from a file instead of a pipe changes them (MP4 with a trailing index,
+   MP3; extension 5 in the README).
 2. **Same engine code path.** Each worker engine makes the same library
    calls with the same arguments as the corresponding upstream engine
    module, and the Python package versions are pinned to those of the
-   reference image (`worker/requirements/constraints.txt`).
+   reference image (`worker/requirements/constraints.txt`, the reference
+   image's `pip freeze`).
 3. **Same formatting code.** The response body is rendered inside the
    worker: by the library's own writers for openai_whisper and whisperx, and
    by a copy of upstream's writer classes for faster_whisper. The gateway
@@ -510,11 +515,14 @@ probability of `zh`, not of the detected language.
   the reference: ordinary requests, every validation error, malformed and
   truncated bodies, odd filenames, static pages. `go test` replays each
   request against the frontend, with a fake service that returns the
-  reference's own transcript bytes, and compares status, headers and body.
+  reference's own transcript bytes, and compares status, headers and body
+  with the recorded response plus the extensions (`withExtensions` in
+  `reference_test.go`).
 - The worker's tests pin the copied writer code and compare it with the
   installed faster-whisper library.
 - An end-to-end comparison sends the same uploads to a running reference and
-  to a whisper-hub image and compares every response. Its results are in the
+  to a whisper-hub image and compares every response, again with the
+  extensions applied explicitly (`deploy/e2e/fidelity.py`). Its results are in the
   [README](../README.md#verification-status); how to run it is in
   [AGENTS.md](../AGENTS.md#end-to-end-checks).
 

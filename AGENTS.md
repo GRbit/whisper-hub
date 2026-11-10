@@ -64,7 +64,7 @@ They run real containers. The scripts are in `deploy/e2e/`.
 | `make e2e-clients` | the openai Python SDK, the `wyoming` package, a replay of Home Assistant's speech-to-text client and zeroconf discovery, against the gateway image with a canned Go fake worker | Go and ffmpeg on the host |
 | `make e2e-fake` | gateway image plus the Python fake worker: all three protocols, streaming, cancellation on disconnect, priority order (read from the request log), authentication on and off | ffmpeg and python3 on the host |
 | `make e2e-real` | the all-in-one image with model `tiny` on real recordings, and the sidecar compatibility mode | `VOICE_FILES`; ffmpeg and python3 on the host; network access to download the model |
-| `make e2e-fidelity` | byte-for-byte comparison of legacy responses between a running reference and the all-in-one image | `VOICE_FILES`, `REF_REPO`, `REF_IMAGE`; ffmpeg with AAC, MP3 and Opus encoders; python3 |
+| `make e2e-fidelity` | byte-for-byte comparison of legacy responses between the reference (built by `make image-reference`) and the all-in-one image, with whisper-hub's extensions applied explicitly | `VOICE_FILES`; network access to build the reference once; ffmpeg with AAC, MP3 and Opus encoders; python3 |
 | `make e2e-packages` | every Python package of the three single-engine images is installed in `whisper-hub:all` at the same version | the four images already built (`make image ENGINE=...`); python3 |
 | `make e2e` | `e2e-clients`, `e2e-fake`, `e2e-real`, `e2e-fidelity` | all of the above |
 | `make e2e-engines` | builds all four all-in-one images, then `e2e-real` and `e2e-fidelity` for each single-engine image, `e2e-real` for `whisper-hub:all` with every `ASR_ENGINE` value, and `e2e-packages` | all of the above, and a lot of time and disk |
@@ -80,18 +80,23 @@ Inputs the scripts take from the environment:
 | Variable | Meaning |
 |---|---|
 | `VOICE_FILES` | a directory with two WAV recordings: `english-front-center.wav` (a copy is in `internal/legacy/testdata/audio/`; the checks expect the words "front center") and `german-20s.wav` (about 20 seconds of German speech; the checks expect language `de`). The fidelity script sends every `*.wav` in the directory |
-| `REF_REPO` | a git checkout of whisper-asr-webservice that has a branch named `main` holding the reference's `app/` directory |
-| `REF_IMAGE` | an image built from upstream's Dockerfile (default name `whisper-asr-webservice:ec32cd5`). The reference `app/` is mounted over the image's own |
+| `REF_IMAGE` | the reference image; default from `deploy/e2e/reference/upstream.env`, as built by `make image-reference` |
 | `CACHE_VOLUME` | Docker volume for downloaded models (default `whub-e2e-cache`) |
 | `GATEWAY_IMAGE`, `WORKER_IMAGE`, `AIO_IMAGE`, `E2E_IMAGE` | override the images under test |
 
-The script defaults for `VOICE_FILES` and `REF_REPO` are paths on the
-original development machine, so set both explicitly. Neither the reference
-image nor the `main` branch is published; without them `e2e-fidelity`
-and the capture script cannot run, and the recorded cases under
-`internal/legacy/testdata/reference/` are the guard that remains. Without
-`VOICE_FILES`, `e2e-fake` generates test tones and still runs, while
-`e2e-real` stops with an error.
+The reference is public upstream whisper-asr-webservice, `main` at the
+commit pinned in `deploy/e2e/reference/upstream.env` (with its URL and the
+image name). Anyone reproduces it with `make image-reference`, which runs
+`docker build` on the git URL at that commit with upstream's own Dockerfile;
+the container then runs as built. The only addition, for whisperx alone, is
+`deploy/e2e/reference/sitecustomize.py`, the same torch allowlist the worker
+uses, without which upstream's whisperx does not start. To move to a newer
+upstream: change the commit, rebuild, run `capture.sh` and `make
+e2e-fidelity`, and update `worker/requirements/constraints.txt` from the new
+image's `pip freeze`.
+
+`VOICE_FILES` has no default: `e2e-real` and `e2e-fidelity` stop with an
+error without it, while `e2e-fake` then generates test tones and still runs.
 
 CI (`.github/workflows/ci.yml`) runs the Go checks, the worker tests for
 `fake` and `faster_whisper`, `e2e-clients` and `e2e-fake`. Nothing in CI
@@ -155,7 +160,7 @@ Worker (Python, `worker/`):
 - `whisper_worker/legacy_writers.py` - upstream's writers for
   faster_whisper, copied. `model_resolver.py` - Hugging Face URLs.
 - `requirements/` - one file per engine, `all.txt` for the all-engines
-  image, `constraints.txt` with the pinned versions of the reference image,
+  image, `constraints.txt` with the versions the reference image installs,
   `constraints-cpu.txt` with the one pin that CUDA images must not get
   (triton: CUDA torch requires its own exact version).
 - `tests/` - pytest suite, run in the `test` stage of `worker/Dockerfile`.
@@ -243,10 +248,13 @@ approval. That covers:
 
 - **The legacy API**: paths, parameter names and defaults, status codes,
   error bodies, response headers, content types and output bytes. It must
-  stay identical to the reference. Guards: `go test ./internal/legacy`
-  replays the recorded reference exchanges in `testdata/reference/cases/`
-  and compares status, headers and body; `make e2e-fidelity` compares whole
-  responses against a running reference. A legitimate change means running
+  stay identical to the reference plus whisper-hub's extensions (listed in
+  the README, "Extensions to upstream", and applied in
+  `internal/legacy/reference_test.go` and `deploy/e2e/fidelity.py`).
+  Guards: `go test ./internal/legacy` replays the recorded reference
+  exchanges in `testdata/reference/cases/` and compares status, headers and
+  body; `make e2e-fidelity` compares whole responses against a running
+  reference. A legitimate change means running
   `internal/legacy/testdata/reference/capture.sh` against the reference
   again; never edit `internal/legacy/static/` or the recorded cases by hand.
 - **Deployment compatibility**: the upstream and sidecar environment
@@ -257,8 +265,8 @@ approval. That covers:
   variable), subcommands and flags, the users file format, the field names
   of the usage totals file and the request log, `/healthz`, `/_hub/usage`,
   image names and tags, and error strings clients may match on.
-- **Engine library versions** in `worker/requirements/`: they are pinned to
-  the reference image because output fidelity depends on them.
+- **Engine library versions** in `worker/requirements/`: they are the
+  reference image's, because output fidelity depends on them.
 
 The worker API is internal and may change, provided the Python worker, the
 Go client, the Go fake and `docs/worker-api.md` change together.

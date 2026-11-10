@@ -601,27 +601,55 @@ endpoint `/_sidecar/healthz` is replaced by `/healthz`.
 
 ### What "byte for byte" refers to
 
-whisper-hub is compared with a **reference**: upstream as it stood after its
-1.10.0 release, with the patches that the deployments it replaces were
-running. For the same upload, the reference and whisper-hub return the same
-status code, the same headers and the same body, except for the differences
-listed below.
+whisper-hub is compared with a **reference**: public upstream
+[whisper-asr-webservice](https://github.com/ahmetoner/whisper-asr-webservice),
+`main` at the commit pinned in
+[`deploy/e2e/reference/upstream.env`](deploy/e2e/reference/upstream.env)
+(release 1.10.0), built from that commit and run unmodified:
 
-The reference differs from stock upstream in three visible ways, and
-whisper-hub follows the reference in each:
+```bash
+make image-reference   # docker build -t whisper-asr-webservice:ec32cd5 \
+                       #   "https://github.com/ahmetoner/whisper-asr-webservice.git#<commit>"
+```
 
-- An upload that cannot be decoded gets
-  `400 {"detail": "<reason> (<size> bytes, magic=<first bytes in hex>)"}`,
-  and an engine failure gets `500 {"detail": "Transcription failed"}`.
-- `/asr` and `/detect-language` report the length of the decoded audio in
-  an `X-Audio-Duration-Seconds` response header; `/detect-language` also in
-  the field `audio_duration_seconds`.
-- Uploads are written to disk before decoding, so M4A recordings with the
-  index at the end of the file (as Android writes them) decode correctly.
+The worker's engine libraries (`worker/requirements/constraints.txt`) are
+exactly the versions that image installs. For the same upload, the reference
+and whisper-hub return the same status code, headers and body, except for
+whisper-hub's extensions below and the differences listed after them.
+
+### Extensions to upstream
+
+whisper-hub deliberately answers these differently from upstream. The
+recorded-case replay (`internal/legacy/reference_test.go`) and the fidelity
+comparison (`deploy/e2e/fidelity.py`) apply exactly these on top of the
+reference's responses, and nothing else may differ:
+
+1. `/asr` and `/detect-language` report the length of the decoded audio in
+   an `X-Audio-Duration-Seconds` header (also on a failed transcription);
+   `/detect-language` also in the field `audio_duration_seconds`.
+2. An engine failure gets `500 {"detail": "Transcription failed"}` (or
+   `"Language detection failed"`); upstream answers a plain-text
+   `Internal Server Error`.
+3. An upload that cannot be decoded, or raw PCM of odd length, gets
+   `400 {"detail": "<reason> (<size> bytes, magic=<first bytes in hex>)"}`;
+   upstream answers a plain-text 500.
+4. An upload that decodes to no audio at all gets the same kind of 400
+   (`Audio decoded to 0 samples ...`); upstream answers 200 with an empty
+   transcript.
+5. Uploads are written to disk and ffmpeg reads them from the file;
+   upstream pipes them into ffmpeg. MP4 and M4A recordings with the index
+   at the end of the file (as Android writes them) therefore decode, where
+   upstream gets no audio; and MP3 encoder delay is trimmed (it is only
+   readable from a seekable file), so MP3 transcripts can differ slightly
+   from upstream's. WAV, Ogg and the other formats decode to the same
+   samples either way.
+6. Settings upstream does not have: `LOG_LEVEL`, `UPLOAD_SPOOL_DIR`,
+   `DEBUG_FAILED_UPLOADS_DIR`, and Hugging Face URLs in `ASR_MODEL`
+   (faster_whisper and whisperx).
 
 ### Known differences
 
-Legacy API, compared with the reference:
+Legacy API, besides the extensions above:
 
 - The gateway is ready before the model: it answers 503 with
   `{"detail": ...}` while the worker loads, where upstream does not listen
@@ -633,8 +661,10 @@ Legacy API, compared with the reference:
 - whisperx with `initial_prompt` works; upstream answers 500, because its
   whisperx version rejects the argument.
 - whisperx starts at all: the worker allowlists the classes of the voice
-  activity model bundled with whisperx for torch's safe loading. The
-  reference image fails to start whisperx for that reason.
+  activity model bundled with whisperx for torch's safe loading. Upstream's
+  image fails to start whisperx for that reason (the fidelity script gives
+  the reference the same allowlist, `deploy/e2e/reference/sitecustomize.py`,
+  and nothing else).
 - Two upstream oddities are kept for fidelity. whisperx diarization passes
   `min_speakers` and `max_speakers` by position, as upstream does, so
   `min_speakers` is taken as the exact number of speakers and `max_speakers`
@@ -648,7 +678,8 @@ Legacy API, compared with the reference:
   model access, unknown models and unavailable workers.
 - HTTP edge cases follow Go's `net/http` rather than uvicorn: a path like
   `//asr` gets a 301 instead of a 404, the order of the `Allow` header is
-  fixed, and request limits and the handling of malformed HTTP differ.
+  fixed (upstream's varies per process), and request limits and the
+  handling of malformed HTTP differ.
   Speaker counts beyond the integer range saturate. Multipart charsets
   other than utf-8 and latin-1 are read as utf-8.
 
