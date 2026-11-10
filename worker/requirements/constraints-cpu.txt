@@ -1,4 +1,0 @@
-# CPU images only. CUDA torch wheels require their own exact triton
-# (2.7.1 wants 3.3.1), so this pin from the reference image would make
-# the GPU install unresolvable.
-triton==3.7.1

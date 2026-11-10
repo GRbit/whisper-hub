@@ -23,7 +23,7 @@ RUN --mount=type=cache,target=/root/.cache/pip \
       fake|faster_whisper) extra="" ;; \
       *) echo "unknown ENGINE=${ENGINE}" >&2; exit 1 ;; \
     esac \
-    && pip install ${extra} -c requirements/constraints.txt -c requirements/constraints-cpu.txt -r "requirements/${ENGINE}.txt" \
+    && pip install ${extra} -c requirements/constraints.txt -r "requirements/${ENGINE}.txt" \
     && if [ -f "requirements/${ENGINE}-nodeps.txt" ]; then pip install --no-deps -r "requirements/${ENGINE}-nodeps.txt"; fi
 
 COPY whisper_worker/ whisper_worker/

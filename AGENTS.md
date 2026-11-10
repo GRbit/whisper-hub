@@ -160,9 +160,8 @@ Worker (Python, `worker/`):
 - `whisper_worker/legacy_writers.py` - upstream's writers for
   faster_whisper, copied. `model_resolver.py` - Hugging Face URLs.
 - `requirements/` - one file per engine, `all.txt` for the all-engines
-  image, `constraints.txt` with the versions the reference image installs,
-  `constraints-cpu.txt` with the one pin that CUDA images must not get
-  (triton: CUDA torch requires its own exact version).
+  image, `constraints.txt` with the versions the reference image installs
+  (triton excepted: the version CUDA torch requires is used everywhere).
 - `tests/` - pytest suite, run in the `test` stage of `worker/Dockerfile`.
 - `scripts/fidelity.py` - compares a worker's rendered output with a running
   upstream service on the same raw PCM.
