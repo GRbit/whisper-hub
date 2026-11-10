@@ -39,21 +39,9 @@ type Config struct {
 	// clients choose their own address for rate limiting and logs.
 	TrustForwarded bool `yaml:"trust_forwarded"`
 
-	Admin     AdminConfig     `yaml:"admin"`
 	RateLimit RateLimitConfig `yaml:"rate_limit"`
 	Wyoming   WyomingConfig   `yaml:"wyoming"`
 	Usage     UsageConfig     `yaml:"usage"`
-}
-
-// AdminConfig limits the models of admin access, which is any request
-// without checked credentials (core.Identity.NetworkAdmin).
-type AdminConfig struct {
-	// Restrict, when true, limits admin access to the default model plus
-	// Models. Default false: admin access may use every model.
-	Restrict bool `yaml:"restrict"`
-	// Models are model id patterns (exact ids or "*" globs) granted to
-	// admin access when Restrict is set.
-	Models []string `yaml:"models"`
 }
 
 // RateLimitConfig throttles failed authentication attempts per client

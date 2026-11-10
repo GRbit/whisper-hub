@@ -82,12 +82,6 @@ auth:
   # Take the client address from X-Forwarded-For / X-Real-IP. Only behind a
   # trusted reverse proxy.
   trust_forwarded: false
-  admin:
-    # Admin access is every request without checked credentials (auth off,
-    # an unprotected path, http.open_listen). restrict limits it to the
-    # default model plus these patterns. Off by default: every model.
-    restrict: false
-    models: []
   rate_limit:
     # Failed logins per window from one client address. Further attempts
     # in that window get 401 with Retry-After. Negative disables the limit.

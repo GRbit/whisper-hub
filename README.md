@@ -371,9 +371,9 @@ every request has admin access and may use every model, as with upstream:
 the service trusts its callers because the network restricts who can reach
 it. The same admin access applies, with authentication on, to paths outside
 `auth.protected_paths` and to the optional second listener
-`http.open_listen`, which serves the same routes without authentication.
-`auth.admin.restrict` and `auth.admin.models` limit admin access to the
-default model plus the listed patterns.
+`http.open_listen` (the admin port), which serves the same routes without
+authentication. Model restrictions are for users only: admin access may
+always use every model.
 
 To turn it on with compose:
 

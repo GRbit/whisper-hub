@@ -316,9 +316,8 @@ the model:
   or a glob in which `*` matches any run of characters, `/` included.
 - A request for a model the user may not use fails as `forbidden`. It never
   silently falls back to the default model.
-- Admin access, meaning any request without checked credentials, may use
-  every model, unless `auth.admin.restrict` limits it to the default model
-  plus `auth.admin.models`.
+- Admin access, meaning any request without checked credentials, may
+  always use every model: restrictions are for users only.
 
 `Models` applies the same rule, which is why `/v1/models` and the Wyoming
 `info` answer show only what the caller may use.

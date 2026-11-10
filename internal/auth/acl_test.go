@@ -9,7 +9,6 @@ import (
 
 func TestAllowModel(t *testing.T) {
 	open := newAuth(t, Config{})
-	restricted := newAuth(t, Config{Admin: AdminConfig{Restrict: true, Models: []string{"base"}}})
 	netAdmin := core.IdentityFrom(t.Context())
 	user := func(models ...string) *core.Identity { return &core.Identity{User: "u", Models: models} }
 
@@ -36,10 +35,6 @@ func TestAllowModel(t *testing.T) {
 		{"star grants all", open, user("*"), "whatever/model", false, true},
 		{"network admin unrestricted", open, netAdmin, "large-v3", false, true},
 		{"nil identity is network admin", open, nil, "large-v3", false, true},
-		{"network admin restricted: default", restricted, netAdmin, "tiny", true, true},
-		{"network admin restricted: granted", restricted, netAdmin, "base", false, true},
-		{"network admin restricted: denied", restricted, netAdmin, "large-v3", false, false},
-		{"restriction does not touch users", restricted, user("*"), "large-v3", false, true},
 	}
 	for _, tc := range cases {
 		if got := tc.a.AllowModel(tc.id, tc.model, tc.isDefault); got != tc.want {

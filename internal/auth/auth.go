@@ -50,8 +50,7 @@ func New(cfg Config, rejecters map[string]func(w http.ResponseWriter, err error)
 		rejecters: maps.Clone(rejecters)}
 
 	if cfg.UsersFile == "" {
-		slog.Info("auth: authentication is off (no users file configured), every caller has admin access",
-			"admin_restricted", cfg.Admin.Restrict)
+		slog.Info("auth: authentication is off (no users file configured), every caller has admin access")
 		return a, nil
 	}
 	cache := newCredCache()
@@ -119,23 +118,15 @@ func (a *Auth) Totals() map[string]UserTotals { return a.rec.Totals() }
 // AllowModel implements core.Authorizer.
 //
 // Authenticated users always get the default model plus whatever their
-// models patterns match. Admin access without credentials gets everything
-// unless admin.restrict is set, in which case it is treated like a user
-// whose patterns are admin.models.
+// models patterns match. Restrictions are for users only: admin access
+// without credentials gets every model.
 func (a *Auth) AllowModel(id *core.Identity, model string, isDefault bool) bool {
-	var allowed bool
-	switch {
-	case id == nil || id.NetworkAdmin:
-		allowed = !a.cfg.Admin.Restrict || isDefault || matchAny(a.cfg.Admin.Models, model)
-	default:
-		allowed = isDefault || matchAny(id.Models, model)
+	if id == nil || id.NetworkAdmin {
+		return true
 	}
+	allowed := isDefault || matchAny(id.Models, model)
 	if !allowed {
-		user := core.NetworkAdminUser
-		if id != nil {
-			user = id.User
-		}
-		slog.Debug("auth: model denied", "user", user, "model", model)
+		slog.Debug("auth: model denied", "user", id.User, "model", model)
 	}
 	return allowed
 }
