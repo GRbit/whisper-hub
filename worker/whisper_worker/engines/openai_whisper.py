@@ -1,7 +1,7 @@
 """openai-whisper backend.
 
 Engine calls mirror upstream app/asr_models/openai_whisper_engine.py
-(whisper-asr-webservice, MIT License) so legacy output stays byte-identical.
+(whisper-asr-webservice, MIT License) so legacy output matches upstream's.
 
 whisper.transcribe() has no callback, but it updates a (disabled) tqdm
 progress bar after every 30 s window. We swap in a tqdm subclass that, for

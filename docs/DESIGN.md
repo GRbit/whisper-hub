@@ -12,10 +12,12 @@ at once:
 
 1. **Legacy**: the HTTP API of
    [whisper-asr-webservice](https://github.com/ahmetoner/whisper-asr-webservice)
-   (`/asr`, `/detect-language`, `/docs`). The goal is full compatibility:
-   an existing deployment (same port, same environment variables, same
-   flags, same model cache) and its clients keep working when the image is
-   swapped, and responses are identical byte for byte.
+   (`/asr`, `/detect-language`, `/docs`). The goal is API compatibility,
+   guaranteed for whisper-hub major versions 0 and 1 (from 2.0 on it may
+   be dropped): an existing deployment (same port, same environment
+   variables, same flags, same model cache) and its clients keep working
+   when the image is swapped. Responses are compared with upstream byte
+   for byte as a verification tool; identity is not promised.
 2. **OpenAI**: `/v1/audio/transcriptions`, `/v1/audio/translations` and
    `/v1/models`, compatible at the level of OpenAI's `whisper-1` model, so
    that official SDKs work unchanged.
@@ -172,7 +174,7 @@ The worker (`worker/whisper_worker/`) mirrors the same idea in Python:
 | `models.py` | model lifecycle (lazy loading, eviction, idle unloading) and one job at a time per model |
 | `engines/base.py` | the `Engine` interface (`load`, `unload`, `transcribe`, `detect_language`, `capabilities`) and the engine-neutral segment shape |
 | `engines/*.py` | one adapter per engine |
-| `legacy_writers.py` | the output writers upstream uses for faster_whisper, copied so that output is identical |
+| `legacy_writers.py` | the output writers upstream uses for faster_whisper, copied so that output matches |
 | `model_resolver.py` | Hugging Face URLs as model names |
 
 ### Worker API
@@ -466,7 +468,7 @@ list, with what upstream answers instead, is in the
 [README](../README.md#extensions-to-upstream); the guards below apply
 exactly these extensions to upstream's responses, and nothing else.
 
-### How identical output is achieved
+### How output is matched
 
 A transcript is the product of four things: the decoded audio, the model and
 library that process it, the code that formats the result, and the HTTP

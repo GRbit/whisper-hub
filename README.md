@@ -7,8 +7,8 @@ once, in front of [Whisper](https://github.com/openai/whisper) models:
   [whisper-asr-webservice](https://github.com/ahmetoner/whisper-asr-webservice)
   (`/asr`, `/detect-language`, `/docs`), called "upstream" in this document.
   whisper-hub is a drop-in replacement for it: same port, same environment
-  variables and flags, same model cache, and responses that are identical
-  byte for byte (see [Compatibility](#compatibility)).
+  variables and flags, same model cache, and the same API, with a few
+  listed extensions (see [Compatibility](#compatibility)).
 - **OpenAI**: `/v1/audio/transcriptions`, `/v1/audio/translations` and
   `/v1/models`, at the level of OpenAI's `whisper-1` model. The official
   SDKs work unchanged.
@@ -575,7 +575,19 @@ used it.
 
 ## Compatibility
 
-### What "byte for byte" refers to
+### What is promised
+
+- The legacy API stays compatible with upstream whisper-asr-webservice for
+  whisper-hub major versions 0 and 1. From 2.0 on this compatibility may
+  be dropped.
+- Compatible means API compatibility: the same paths, parameters, status
+  codes and response shapes, with the [extensions](#extensions-to-upstream)
+  listed below. whisper-hub does not promise byte-for-byte identity with
+  upstream. The byte-level comparison described here is a verification
+  tool, and its results under [Verification status](#verification-status)
+  are what was measured.
+
+### The reference
 
 whisper-hub is compared with a **reference**: public upstream
 [whisper-asr-webservice](https://github.com/ahmetoner/whisper-asr-webservice),
@@ -589,16 +601,17 @@ make image-reference   # docker build -t whisper-asr-webservice:ec32cd5 \
 ```
 
 The worker's engine libraries (`worker/requirements/constraints.txt`) are
-exactly the versions that image installs. For the same upload, the reference
-and whisper-hub return the same status code, headers and body, except for
-whisper-hub's extensions below and the differences listed after them.
+exactly the versions that image installs. The comparison sends the same
+upload to both and checks status code, headers and body; apart from
+whisper-hub's extensions below and the differences listed after them, the
+measured responses were the same.
 
 ### Extensions to upstream
 
 whisper-hub deliberately answers these differently from upstream. The
 recorded-case replay (`internal/legacy/reference_test.go`) and the fidelity
 comparison (`deploy/e2e/fidelity.py`) apply exactly these on top of the
-reference's responses, and nothing else may differ:
+reference's responses and report anything else as a difference:
 
 1. `/asr` and `/detect-language` report the length of the decoded audio in
    an `X-Audio-Duration-Seconds` header (also on a failed transcription);

@@ -1,7 +1,7 @@
 """WhisperX backend: batched transcription, forced alignment, optional diarization.
 
 Engine calls mirror upstream app/asr_models/mbain_whisperx_engine.py
-(whisper-asr-webservice, MIT License) so legacy output stays byte-identical.
+(whisper-asr-webservice, MIT License) so legacy output matches upstream's.
 WhisperX returns everything at once; cancellation is checked between the
 transcribe, align and diarize stages.
 """

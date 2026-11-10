@@ -1,7 +1,7 @@
 """faster-whisper backend. Streams segments as the library yields them.
 
 Engine calls mirror upstream app/asr_models/faster_whisper_engine.py
-(whisper-asr-webservice, MIT License) so legacy output stays byte-identical.
+(whisper-asr-webservice, MIT License) so legacy output matches upstream's.
 """
 
 import logging

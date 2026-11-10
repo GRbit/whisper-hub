@@ -246,11 +246,16 @@ Observable behavior does not change without the maintainer's explicit
 approval. That covers:
 
 - **The legacy API**: paths, parameter names and defaults, status codes,
-  error bodies, response headers, content types and output bytes. It must
-  stay identical to the reference plus whisper-hub's extensions (listed in
-  the README, "Extensions to upstream", and applied in
-  `internal/legacy/reference_test.go` and `deploy/e2e/fidelity.py`).
-  Guards: `go test ./internal/legacy` replays the recorded reference
+  error bodies, response headers, content types and output bytes.
+  Compatibility with upstream whisper-asr-webservice is guaranteed for
+  whisper-hub major versions 0 and 1; from 2.0 on it may be dropped, and
+  the reference checks then no longer need to run. The promise is API
+  compatibility plus whisper-hub's extensions (listed in the README,
+  "Extensions to upstream", and applied in
+  `internal/legacy/reference_test.go` and `deploy/e2e/fidelity.py`), not
+  byte-for-byte identity: the byte-level comparison is a verification
+  tool, and a change that makes it differ still needs the maintainer's
+  approval. Guards: `go test ./internal/legacy` replays the recorded reference
   exchanges in `testdata/reference/cases/` and compares status, headers and
   body; `make e2e-fidelity` compares whole responses against a running
   reference. A legitimate change means running

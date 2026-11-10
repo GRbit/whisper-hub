@@ -1,6 +1,7 @@
 // Package legacy serves the HTTP API of ahmetoner/whisper-asr-webservice
 // (/asr, /detect-language, /docs, /openapi.json, /assets) on top of
-// core.Service, byte for byte where the reference is deterministic.
+// core.Service. It aims at the reference's bytes where the reference is
+// deterministic; what is promised is API compatibility.
 //
 // Transcript bodies are not formatted here: the engine worker renders them
 // with the reference code (core.Request.LegacyOutput). Everything around the
