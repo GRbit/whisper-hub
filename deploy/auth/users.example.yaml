@@ -10,8 +10,12 @@ users:
     models: ["small", "large-*"]
   - name: scripts
     api_keys: ["sha256:REPLACE_WITH_OUTPUT_OF_whisper-hub_apikey"]
-  # Wyoming connections (Home Assistant) act as this user; no credentials.
-  - name: homeassistant
+  # Optional: every Wyoming connection (Home Assistant) acts as the user
+  # "wyoming". Without this entry it may use every model; with it, its
+  # models patterns apply and disabled: true refuses Wyoming. Give it no
+  # credentials, and protect the Wyoming port by network.
+  - name: wyoming
+    models: ["small"]
   - name: admin
     api_keys: ["sha256:REPLACE_WITH_OUTPUT_OF_whisper-hub_apikey"]
     admin: true

@@ -90,9 +90,9 @@ auth:
     failures: 10
     window: 1m
   wyoming:
-    # Wyoming has no credentials: connections act as this users file entry.
-    # With authentication on and no user, Wyoming connections are refused.
-    user: ""
+    # Wyoming has no credentials: every connection acts as the user
+    # "wyoming", restricted only by a users file entry of that name. Protect
+    # the port by network; this list is that restriction inside the gateway.
     allow_cidrs: [] # e.g. ["192.168.1.0/24"]; empty allows every source
   # Usage accounting, see README "Usage accounting". It works with
   # authentication off too (the user is then "admin").

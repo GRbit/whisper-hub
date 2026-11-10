@@ -231,7 +231,7 @@ The sections of the file:
 | `log` | `level` (debug, info, warn, error) and `format` (text, json) |
 | `audio` | ffmpeg path, spool directory for uploads, dumps of uploads that fail to decode |
 | `hub` | workers, default model, aliases, queue, timeouts |
-| `auth` | users file, protected paths, rate limit, Wyoming identity, usage files |
+| `auth` | users file, protected paths, rate limit, Wyoming source networks, usage files |
 | `legacy`, `openai`, `wyoming` | the three protocols |
 | `worker` | the worker process the gateway starts itself; the all-in-one images set it |
 
@@ -352,10 +352,21 @@ Home Assistant can also discover the service by zeroconf
 (`wyoming.zeroconf.enabled: true`). That only works when the container uses
 host networking and is on the same network segment as Home Assistant.
 
-Wyoming carries no credentials. With authentication on, Wyoming connections
-act as the user named in `auth.wyoming.user`, optionally limited to source
-addresses in `auth.wyoming.allow_cidrs`. A refused connection gets a Wyoming
-`error` event.
+Wyoming carries no credentials, so the network decides who may connect:
+keep the port on a network you trust, and optionally limit source addresses
+with `auth.wyoming.allow_cidrs`. Every Wyoming connection acts as the user
+`wyoming`, with authentication on or off, so its jobs and usage have their
+own entry. With authentication on, a users file entry named `wyoming`
+restricts it: its `models` patterns apply, and `disabled: true` on that
+entry makes whisper-hub refuse every Wyoming connection:
+
+```yaml
+  - name: wyoming
+    disabled: true
+```
+
+Without such an entry Wyoming may use every model. A refused connection
+gets a Wyoming `error` event.
 
 ### Health
 
@@ -391,7 +402,8 @@ users:
     password_hash: "$2a$12$..."    # from: whisper-hub hash
     api_keys: ["sha256:..."]       # from: whisper-hub apikey
     models: ["small", "large-*"]   # allowed besides the default model
-  - name: homeassistant            # the Wyoming identity; needs no credentials
+  - name: wyoming                  # optional: restricts Wyoming connections
+    models: ["small"]
   - name: admin
     api_keys: ["sha256:..."]
     admin: true                    # may read /_hub/usage
@@ -431,8 +443,9 @@ How it behaves:
   401 and a `Retry-After` header until the minute is over. Behind a reverse
   proxy set `auth.trust_forwarded: true`, so that the client address is
   taken from `X-Forwarded-For`.
-- **Wyoming**: see [above](#wyoming-home-assistant). With authentication on
-  and no `auth.wyoming.user`, Wyoming connections are refused.
+- **Wyoming**: see [above](#wyoming-home-assistant). An entry named
+  `wyoming` is how Wyoming is restricted; the port itself must be protected
+  by the network.
 
 ## Usage accounting
 
@@ -548,8 +561,8 @@ curl -H "Authorization: Bearer $ADMIN_KEY" "http://localhost:9000/_hub/usage?use
 ```
 
 **With authentication off**, accounting still works: all HTTP jobs are
-recorded for the user `admin`, and Wyoming jobs for the name in
-`auth.wyoming.user` (`admin` when it is empty). Jobs without credentials
+recorded for the user `admin`, and Wyoming jobs, as always, for the user
+`wyoming`. Jobs without credentials
 while authentication is on (unprotected paths, `http.open_listen`) are
 recorded for `admin` too, in the same entry as a users file account named
 `admin` if there is one. The log line, the request log file, the totals

@@ -9,7 +9,6 @@ services:
   whisper:
     environment:
       - WHISPER_HUB_AUTH_USERS_FILE=/config/users.yaml
-      - WHISPER_HUB_AUTH_WYOMING_USER=homeassistant
       # Next to the totals in the usage-data volume of docker-compose.yml.
       - WHISPER_HUB_AUTH_USAGE_LOG_FILE=/data/requests.jsonl
     volumes:

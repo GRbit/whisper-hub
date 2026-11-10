@@ -64,7 +64,7 @@ const (
 
 // validUsers: alice (password + key, models small and large-*, admin), bob
 // (password only, no models), carol (key only, disabled), ha (no
-// credentials, the Wyoming user).
+// credentials, every model).
 func validUsers(t testing.TB) string {
 	t.Helper()
 	return "users:\n" +

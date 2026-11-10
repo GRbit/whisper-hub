@@ -60,8 +60,8 @@ check() { # container args...
 		-v "$here/stack_check.py:/stack_check.py:ro" "$e2e_image" /stack_check.py "$@"
 }
 
-# Users: alice with a password (legacy Basic) and an API key (OpenAI);
-# homeassistant is the Wyoming identity.
+# Users: alice with a password (legacy Basic) and an API key (OpenAI); the
+# entry named wyoming applies to Wyoming connections (no restrictions here).
 key="wh_e2e_$(head -c 12 /dev/urandom | od -An -tx1 | tr -d ' \n')"
 key_hash="sha256:$(printf %s "$key" | sha256sum | cut -d' ' -f1)"
 pw_hash="$(printf 'e2e-secret\n' | docker run --rm -i --entrypoint whisper-hub "$gateway_image" hash)"
@@ -70,7 +70,8 @@ users:
   - name: alice
     password_hash: "$pw_hash"
     api_keys: ["$key_hash"]
-  - name: homeassistant
+  - name: wyoming
+    models: ["*"]
 YAML
 chmod 644 "$work/users.yaml"
 
@@ -81,7 +82,7 @@ if [ "$mode" = fake ]; then
 	docker run -d --name whub-s-gw --network "$net" -v "$work/data:/data" "${gw_env[@]}" \
 		-e WHISPER_HUB_AUTH_USAGE_LOG_FILE=/data/requests.jsonl "$gateway_image" >/dev/null
 	docker run -d --name whub-s-gw-auth --network "$net" -v "$work:/work:ro" "${gw_env[@]}" \
-		-e WHISPER_HUB_AUTH_USERS_FILE=/work/users.yaml -e WHISPER_HUB_AUTH_WYOMING_USER=homeassistant "$gateway_image" >/dev/null
+		-e WHISPER_HUB_AUTH_USERS_FILE=/work/users.yaml "$gateway_image" >/dev/null
 	wait_healthy whub-s-gw 9000
 	wait_healthy whub-s-gw-auth 9000
 
@@ -106,7 +107,7 @@ print(("ok   " if ok else "FAIL ") + "usage log: wyoming queued %d ms behind the
       % (w["queued_ms"], q1["queued_ms"], q2["queued_ms"]))
 sys.exit(0 if ok else 1)
 PY
-	echo "== fake worker, auth on (Basic for legacy, API key for OpenAI, Wyoming as homeassistant)"
+	echo "== fake worker, auth on (Basic for legacy, API key for OpenAI, Wyoming as wyoming)"
 	check --mode fake --http http://whub-s-gw-auth:9000 --wyoming whub-s-gw-auth:10300 \
 		--basic alice:e2e-secret --key "$key" --only legacy,sdk,wyoming || status=1
 	code=$(docker run --rm --network "$net" --entrypoint python3 "$e2e_image" -c \

@@ -56,14 +56,9 @@ type RateLimitConfig struct {
 	Window time.Duration `yaml:"window"`
 }
 
-// WyomingConfig maps Wyoming connections, which carry no credentials, to a
-// user.
+// WyomingConfig restricts Wyoming connections, which carry no credentials
+// and always act as core.WyomingUser, by network.
 type WyomingConfig struct {
-	// User is the users file entry Wyoming connections act as; its models
-	// patterns and disabled flag apply. With authentication on and User
-	// empty, Wyoming connections are refused. With authentication off it
-	// only names the caller in usage records (default "admin").
-	User string `yaml:"user"`
 	// AllowCIDRs restricts source addresses ("192.168.1.0/24", "::1/128").
 	// Empty (the default) allows every address.
 	AllowCIDRs []string `yaml:"allow_cidrs"`

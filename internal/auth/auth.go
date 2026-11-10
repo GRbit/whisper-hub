@@ -62,12 +62,6 @@ func New(cfg Config, rejecters map[string]func(w http.ResponseWriter, err error)
 	slog.Info("auth: authentication is on", "users_file", cfg.UsersFile,
 		"protected_paths", cfg.ProtectedPaths, "rate_limit_failures", cfg.RateLimit.Failures,
 		"rate_limit_window", cfg.RateLimit.Window)
-	if cfg.Wyoming.User == "" {
-		slog.Warn("auth: wyoming.user is not set, Wyoming connections will be refused while authentication is on")
-	} else if _, ok := a.authn.store.get().lookup(cfg.Wyoming.User); !ok {
-		slog.Warn("auth: wyoming.user is not in the users file, Wyoming connections will be refused until it is added",
-			"user", cfg.Wyoming.User)
-	}
 	return a, nil
 }
 

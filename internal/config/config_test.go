@@ -203,7 +203,6 @@ var zeroByDefault = map[string]bool{
 	"hub.aliases.whisper-1":          true, // "" is the default model
 	"auth.users_file":                true,
 	"auth.trust_forwarded":           true,
-	"auth.wyoming.user":              true,
 	"auth.wyoming.allow_cidrs":       true,
 	"auth.usage.totals_file":         true,
 	"auth.usage.default_totals_file": true, // the images set it

@@ -337,15 +337,15 @@ func TestAuthOffOpenAIAndWyoming(t *testing.T) {
 		t.Fatalf("wyoming: %+v", ev)
 	}
 	// With auth off every caller has admin access, so usage is served;
-	// Wyoming jobs are counted under admin, per protocol.
+	// Wyoming jobs have their own entry.
 	code, out = getJSON(t, r.base+auth.UsagePath, none)
-	adm, _ := out["users"].(map[string]any)["admin"].(map[string]any)
-	if code != http.StatusOK || fmt.Sprint(adm["by_protocol"].(map[string]any)["wyoming"].(map[string]any)["requests"]) != "1" {
+	wy, _ := out["users"].(map[string]any)["wyoming"].(map[string]any)
+	if code != http.StatusOK || fmt.Sprint(wy["by_protocol"].(map[string]any)["wyoming"].(map[string]any)["requests"]) != "1" {
 		t.Fatalf("usage endpoint with auth off: %d %v", code, out)
 	}
 	lines := readLog(t, logFile)
 	if !hasLine(lines, "user", "admin", "protocol", "openai", "status", "ok", "model", "tiny") ||
-		!hasLine(lines, "user", "admin", "protocol", "wyoming", "status", "ok") {
+		!hasLine(lines, "user", "wyoming", "protocol", "wyoming", "status", "ok") {
 		t.Fatalf("usage log %v", lines)
 	}
 }
@@ -376,7 +376,6 @@ func TestAuthOnAccessControlAndUsage(t *testing.T) {
 	r := startGateway(t, w, map[string]string{
 		"WHISPER_HUB_AUTH_USERS_FILE":     users,
 		"WHISPER_HUB_AUTH_USAGE_LOG_FILE": logFile,
-		"WHISPER_HUB_AUTH_WYOMING_USER":   "bob",
 		"WHISPER_HUB_HTTP_OPEN_LISTEN":    "127.0.0.1:0",
 	})
 	alice, bob, carol := bearer(aliceKey), basic("bob", "bob-secret"), bearer(carolKey)
@@ -410,7 +409,7 @@ func TestAuthOnAccessControlAndUsage(t *testing.T) {
 		t.Fatalf("bob whisper-1: %d", code)
 	}
 	if ev := wyTranscribe(t, r.g.wyAddr(), 1); ev.Type != "transcript" {
-		t.Fatalf("wyoming as bob: %+v", ev)
+		t.Fatalf("wyoming: %+v", ev)
 	}
 
 	if code, _ := getJSON(t, r.base+auth.UsagePath, alice); code != http.StatusForbidden {
@@ -426,15 +425,16 @@ func TestAuthOnAccessControlAndUsage(t *testing.T) {
 	}
 	us := out["users"].(map[string]any)
 	if fmt.Sprint(us["alice"].(map[string]any)["ok_requests"]) != "1" ||
-		fmt.Sprint(us["bob"].(map[string]any)["requests"]) != "3" ||
-		fmt.Sprint(us["bob"].(map[string]any)["failed_requests"]) != "1" {
+		fmt.Sprint(us["bob"].(map[string]any)["requests"]) != "2" ||
+		fmt.Sprint(us["bob"].(map[string]any)["failed_requests"]) != "1" ||
+		fmt.Sprint(us["wyoming"].(map[string]any)["requests"]) != "1" {
 		t.Fatalf("totals %v", us)
 	}
 	lines := readLog(t, logFile)
 	for _, want := range [][]string{
 		{"user", "alice", "model", "base", "status", "ok"},
 		{"user", "bob", "model", "base", "status", "forbidden"},
-		{"user", "bob", "protocol", "wyoming", "status", "ok"},
+		{"user", "wyoming", "protocol", "wyoming", "status", "ok"},
 	} {
 		if !hasLine(lines, want...) {
 			t.Errorf("usage log lacks %v", want)

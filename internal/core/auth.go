@@ -11,6 +11,10 @@ import (
 // Identity.NetworkAdmin.
 const NetworkAdminUser = "admin"
 
+// WyomingUser is the user every Wyoming connection acts as. Wyoming has no
+// credentials, so only the network restricts who connects.
+const WyomingUser = "wyoming"
+
 // Identity is the caller of a request.
 type Identity struct {
 	// User is the account name; NetworkAdminUser for network admin access.

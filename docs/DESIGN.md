@@ -369,9 +369,12 @@ When it is on:
 - Each API rejects in its own dialect. Legacy paths get a plain-text 401
   with a Basic challenge, so browsers prompt for credentials; `/v1/` gets
   an OpenAI error object.
-- Wyoming carries no credentials. Connections act as the users file entry
-  named in `auth.wyoming.user`, optionally restricted to source networks in
-  `auth.wyoming.allow_cidrs`.
+- Wyoming carries no credentials, so the network restricts it, optionally
+  narrowed by `auth.wyoming.allow_cidrs`. Every connection acts as the
+  user `wyoming` (`core.WyomingUser`); a users file entry of that name
+  applies its `models` and `disabled`, and without one every model is
+  allowed. The frontend only asks `WyomingIdentity` for the connection's
+  identity.
 - `http.open_listen` serves the same routes on a second address without the
   middleware: admin access for clients the network already restricts.
 

@@ -9,10 +9,11 @@ import (
 )
 
 // WyomingIdentity resolves the identity a Wyoming connection from remote
-// acts as. Wyoming carries no credentials, so the source allowlist and the
-// configured user are its only access control. Errors are *core.Error:
-// KindForbidden for a source outside wyoming.allow_cidrs, KindUnauthenticated
-// when no usable user is configured.
+// acts as: always core.WyomingUser. Wyoming carries no credentials, so the
+// network (and wyoming.allow_cidrs) decides who connects; a users file
+// entry named core.WyomingUser applies its models patterns and disabled
+// flag. Errors are *core.Error: KindForbidden for a source outside
+// wyoming.allow_cidrs, KindUnauthenticated when that entry is disabled.
 func (a *Auth) WyomingIdentity(remote net.Addr) (*core.Identity, error) {
 	addr, ok := addrOf(remote)
 	if len(a.wyoCIDRs) > 0 {
@@ -31,27 +32,26 @@ func (a *Auth) WyomingIdentity(remote net.Addr) (*core.Identity, error) {
 		}
 	}
 
+	// Unrestricted unless a users file entry named WyomingUser says
+	// otherwise: restrictions are for users, and the network already
+	// decided who may connect.
+	unrestricted := &core.Identity{User: core.WyomingUser, Models: []string{"*"}}
 	if a.authn == nil {
-		name := a.cfg.Wyoming.User
-		if name == "" {
-			name = core.NetworkAdminUser
-		}
-		slog.Debug("auth: wyoming connection accepted with admin access", "remote", addrString(remote), "user", name)
-		return &core.Identity{User: name, NetworkAdmin: true}, nil
+		slog.Debug("auth: wyoming connection accepted", "remote", addrString(remote), "user", core.WyomingUser)
+		return unrestricted, nil
 	}
-
-	name := a.cfg.Wyoming.User
-	if name == "" {
-		slog.Warn("auth: wyoming connection refused, wyoming.user is not configured", "remote", addrString(remote))
-		return nil, core.Errorf(core.KindUnauthenticated, "wyoming is not mapped to a user")
+	u, known := a.authn.store.get().lookup(core.WyomingUser)
+	if !known {
+		slog.Debug("auth: wyoming connection accepted, no users file entry restricts it",
+			"remote", addrString(remote), "user", core.WyomingUser)
+		return unrestricted, nil
 	}
-	u, known := a.authn.store.get().lookup(name)
-	if !known || u.Disabled {
-		slog.Warn("auth: wyoming connection refused, configured user is missing or disabled",
-			"remote", addrString(remote), "user", name)
-		return nil, core.Errorf(core.KindUnauthenticated, "wyoming user is not available")
+	if u.Disabled {
+		slog.Warn("auth: wyoming connection refused, its users file entry is disabled",
+			"remote", addrString(remote), "user", core.WyomingUser)
+		return nil, core.Errorf(core.KindUnauthenticated, "wyoming is disabled")
 	}
-	slog.Debug("auth: wyoming connection accepted", "remote", addrString(remote), "user", name)
+	slog.Debug("auth: wyoming connection accepted", "remote", addrString(remote), "user", core.WyomingUser)
 	return identityOf(u), nil
 }
 
