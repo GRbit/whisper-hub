@@ -288,7 +288,7 @@ func (r *recorder) Record(_ context.Context, ev core.UsageEvent) {
 		ev.Time = r.now()
 	}
 	if ev.User == "" {
-		ev.User = "anonymous"
+		ev.User = core.NetworkAdminUser
 	}
 	r.updateTotals(ev)
 	r.appendLog(logEntry{

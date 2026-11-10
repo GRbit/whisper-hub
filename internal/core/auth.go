@@ -7,11 +7,19 @@ import (
 	"time"
 )
 
-// Identity is the authenticated caller of a request.
+// NetworkAdminUser is the user name recorded for network admin access, see
+// Identity.NetworkAdmin.
+const NetworkAdminUser = "admin"
+
+// Identity is the caller of a request.
 type Identity struct {
-	// User is the account name; "anonymous" when authentication is off.
-	User      string
-	Anonymous bool
+	// User is the account name; NetworkAdminUser for network admin access.
+	User string
+	// NetworkAdmin is set when no credentials were checked: authentication
+	// is off, the path is not protected, or the request came through the
+	// unauthenticated listener. The network restricts who gets that far,
+	// so this is admin access. It is not the users file admin flag.
+	NetworkAdmin bool
 	// Models holds the model id patterns this caller may use, as written
 	// in the users file. Interpreting them is the Authorizer's job.
 	Models []string
@@ -19,7 +27,7 @@ type Identity struct {
 
 type identityKey struct{}
 
-var anonymous = &Identity{User: "anonymous", Anonymous: true}
+var networkAdmin = &Identity{User: NetworkAdminUser, NetworkAdmin: true}
 
 // WithIdentity returns a context carrying id.
 func WithIdentity(ctx context.Context, id *Identity) context.Context {
@@ -27,12 +35,12 @@ func WithIdentity(ctx context.Context, id *Identity) context.Context {
 }
 
 // IdentityFrom returns the caller stored in ctx. It never returns nil: a
-// context without an identity yields the anonymous one.
+// context without an identity yields network admin access.
 func IdentityFrom(ctx context.Context) *Identity {
 	if id, ok := ctx.Value(identityKey{}).(*Identity); ok && id != nil {
 		return id
 	}
-	return anonymous
+	return networkAdmin
 }
 
 // Authorizer decides which models a caller may use.

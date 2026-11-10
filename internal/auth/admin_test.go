@@ -29,7 +29,7 @@ func TestUsageHandler(t *testing.T) {
 	h := a.UsageHandler()
 
 	if w := serve(h, usageReq("", "")); w.Code != http.StatusUnauthorized || w.Header().Get("WWW-Authenticate") == "" {
-		t.Errorf("anonymous: %d, want 401 with a Basic challenge", w.Code)
+		t.Errorf("no credentials: %d, want 401 with a Basic challenge", w.Code)
 	}
 	if w := serve(h, usageReq("bob", "hunter2")); w.Code != http.StatusForbidden {
 		t.Errorf("non-admin: %d", w.Code)

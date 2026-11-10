@@ -18,7 +18,9 @@ import (
 // Zero values mean the documented default; see Resolved.
 type Config struct {
 	// UsersFile is the users file. Empty (the default) turns authentication
-	// off: every request is anonymous, as upstream whisper-asr-webservice.
+	// off: every request has admin access, trusted because the network
+	// restricts who reaches the service, as with upstream
+	// whisper-asr-webservice.
 	// A configured but missing file is created as an empty template and
 	// rejects everyone until it names a user.
 	UsersFile string `yaml:"users_file"`
@@ -37,19 +39,20 @@ type Config struct {
 	// clients choose their own address for rate limiting and logs.
 	TrustForwarded bool `yaml:"trust_forwarded"`
 
-	Anonymous AnonymousConfig `yaml:"anonymous"`
+	Admin     AdminConfig     `yaml:"admin"`
 	RateLimit RateLimitConfig `yaml:"rate_limit"`
 	Wyoming   WyomingConfig   `yaml:"wyoming"`
 	Usage     UsageConfig     `yaml:"usage"`
 }
 
-// AnonymousConfig limits what anonymous callers (authentication off) may do.
-type AnonymousConfig struct {
-	// Restrict, when true, limits anonymous callers to the default model
-	// plus Models. Default false: anonymous callers may use every model.
+// AdminConfig limits the models of admin access, which is any request
+// without checked credentials (core.Identity.NetworkAdmin).
+type AdminConfig struct {
+	// Restrict, when true, limits admin access to the default model plus
+	// Models. Default false: admin access may use every model.
 	Restrict bool `yaml:"restrict"`
 	// Models are model id patterns (exact ids or "*" globs) granted to
-	// anonymous callers when Restrict is set.
+	// admin access when Restrict is set.
 	Models []string `yaml:"models"`
 }
 
@@ -71,7 +74,7 @@ type WyomingConfig struct {
 	// User is the users file entry Wyoming connections act as; its models
 	// patterns and disabled flag apply. With authentication on and User
 	// empty, Wyoming connections are refused. With authentication off it
-	// only names the caller in usage records (default "anonymous").
+	// only names the caller in usage records (default "admin").
 	User string `yaml:"user"`
 	// AllowCIDRs restricts source addresses ("192.168.1.0/24", "::1/128").
 	// Empty (the default) allows every address.

@@ -12,12 +12,12 @@ import (
 	"github.com/GRbit/whisper-hub/internal/core"
 )
 
-func TestAuthOffPassesEverythingAsAnonymous(t *testing.T) {
+func TestAuthOffPassesEverythingAsNetworkAdmin(t *testing.T) {
 	a := newAuth(t, Config{})
 	h := a.Middleware(echoIdentity)
 	for _, p := range []string{"/asr", "/v1/audio/transcriptions", "/docs"} {
 		w := serve(h, httptest.NewRequest(http.MethodPost, p, nil))
-		if w.Code != 200 || w.Header().Get("X-Anonymous") != "1" || w.Header().Get("X-User") != "anonymous" {
+		if w.Code != 200 || w.Header().Get("X-Network-Admin") != "1" || w.Header().Get("X-User") != "admin" {
 			t.Errorf("%s: code %d user %q", p, w.Code, w.Header().Get("X-User"))
 		}
 	}
@@ -132,15 +132,15 @@ func TestMiddlewareStoresIdentity(t *testing.T) {
 		got = core.IdentityFrom(r.Context())
 	}))
 	serve(h, keyReq(aliceKey))
-	if got == nil || got.User != "alice" || got.Anonymous || len(got.Models) != 2 {
+	if got == nil || got.User != "alice" || got.NetworkAdmin || len(got.Models) != 2 {
 		t.Fatalf("identity = %+v", got)
 	}
-	// Public paths stay anonymous even with credentials: no bcrypt there.
+	// Public paths get admin access even with credentials: no bcrypt there.
 	got = nil
 	r := httptest.NewRequest(http.MethodGet, "/docs", nil)
 	r.SetBasicAuth("alice", "secret")
 	serve(h, r)
-	if got == nil || !got.Anonymous {
+	if got == nil || !got.NetworkAdmin {
 		t.Errorf("public path identity = %+v", got)
 	}
 }
@@ -188,7 +188,7 @@ func TestPreflightPassesUnauthenticated(t *testing.T) {
 	// Browsers never attach credentials to a CORS preflight.
 	h := newUsersAuth(t).Middleware(echoIdentity)
 	w := serve(h, httptest.NewRequest(http.MethodOptions, "/v1/audio/transcriptions", nil))
-	if w.Code != 200 || w.Header().Get("X-Anonymous") != "1" {
-		t.Errorf("OPTIONS: %d anonymous=%q", w.Code, w.Header().Get("X-Anonymous"))
+	if w.Code != 200 || w.Header().Get("X-Network-Admin") != "1" {
+		t.Errorf("OPTIONS: %d network admin=%q", w.Code, w.Header().Get("X-Network-Admin"))
 	}
 }

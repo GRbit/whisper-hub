@@ -13,7 +13,8 @@ import (
 // Middleware authenticates requests to protected paths and stores the
 // caller in the request context (read it with core.IdentityFrom). Public
 // paths, OPTIONS requests (CORS preflight), and every path while
-// authentication is off, pass through with the anonymous identity.
+// authentication is off, pass through with admin access
+// (core.Identity.NetworkAdmin).
 //
 // Failures are written by the rejection writer registered for the path
 // (see New), so each API answers in its own dialect; unregistered paths get

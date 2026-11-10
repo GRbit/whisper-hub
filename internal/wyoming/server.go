@@ -31,8 +31,9 @@ type Server struct {
 	limits   limits
 }
 
-// New returns a Server. identify may be nil, which makes every connection
-// anonymous; logger may be nil for slog.Default().
+// New returns a Server. identify may be nil, which gives every connection
+// network admin access (core.Identity.NetworkAdmin); logger may be nil for
+// slog.Default().
 func New(cfg Config, svc core.Service, dec core.AudioDecoder, identify IdentifyFunc, logger *slog.Logger) (*Server, error) {
 	if svc == nil || dec == nil {
 		return nil, errors.New("wyoming: Service and AudioDecoder are required")

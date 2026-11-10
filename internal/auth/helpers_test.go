@@ -103,8 +103,8 @@ func newUsersAuth(t testing.TB) *Auth {
 var echoIdentity = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 	id := core.IdentityFrom(r.Context())
 	w.Header().Set("X-User", id.User)
-	if id.Anonymous {
-		w.Header().Set("X-Anonymous", "1")
+	if id.NetworkAdmin {
+		w.Header().Set("X-Network-Admin", "1")
 	}
 	w.WriteHeader(http.StatusOK)
 })

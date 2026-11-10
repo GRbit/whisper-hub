@@ -121,7 +121,8 @@ Its interface is more than these signatures. A frontend may rely on the
 following, and must not repeat any of it:
 
 - The caller's identity travels in `ctx` (`core.IdentityFrom`). A context
-  without one is the anonymous caller.
+  without one has network admin access (`Identity.NetworkAdmin`, user
+  `admin`).
 - `Request.Model` is passed exactly as the client sent it. The service
   resolves aliases, applies the unknown-model policy and enforces access.
 - The service queues the job by `Request.Priority` and records usage, for
@@ -313,9 +314,9 @@ the model:
   or a glob in which `*` matches any run of characters, `/` included.
 - A request for a model the user may not use fails as `forbidden`. It never
   silently falls back to the default model.
-- Anonymous callers (authentication off) may use every model, unless
-  `auth.anonymous.restrict` limits them to the default model plus
-  `auth.anonymous.models`.
+- Admin access, meaning any request without checked credentials, may use
+  every model, unless `auth.admin.restrict` limits it to the default model
+  plus `auth.admin.models`.
 
 `Models` applies the same rule, which is why `/v1/models` and the Wyoming
 `info` answer show only what the caller may use.
@@ -334,7 +335,8 @@ everyone.
 ## Authentication
 
 Authentication is off until `auth.users_file` is set. While it is off, every
-caller is anonymous, as with upstream.
+request has admin access, as with upstream: the network, not credentials,
+decides who reaches the service.
 
 When it is on:
 
@@ -370,7 +372,7 @@ When it is on:
   named in `auth.wyoming.user`, optionally restricted to source networks in
   `auth.wyoming.allow_cidrs`.
 - `http.open_listen` serves the same routes on a second address without the
-  middleware, for clients whose access the network already restricts.
+  middleware: admin access for clients the network already restricts.
 
 ## Usage accounting
 
@@ -405,7 +407,7 @@ request log for auditing, without any derivative of the password, and are
 deliberately kept out of the totals so that nobody can create entries for
 names of their choosing.
 
-Accounting works with authentication off; the user is then `anonymous`.
+Accounting works with authentication off; the user is then `admin`.
 
 The field lists and the operator's view are in the
 [README](../README.md#usage-accounting).

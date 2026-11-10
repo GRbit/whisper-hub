@@ -17,8 +17,8 @@ http:
   # Main listener: legacy API, OpenAI API, /healthz and the usage endpoint.
   # The upstream --host/--port flags override it.
   listen: ":9000"
-  # Optional second listener serving the same routes WITHOUT authentication,
-  # for clients the network already restricts. Off when "".
+  # Optional second listener serving the same routes WITHOUT authentication:
+  # admin access for clients the network already restricts. Off when "".
   open_listen: ""
   # Running requests may finish for this long after SIGTERM. Give docker a
   # longer stop_grace_period than this, or it kills the process first.
@@ -69,8 +69,9 @@ hub:
   probe_timeout: 30s
 
 auth:
-  # Users file. Empty turns authentication off (everyone is anonymous, as
-  # upstream). A missing file is created as an empty template that rejects
+  # Users file. Empty turns authentication off: every request has admin
+  # access, trusted because the network restricts who reaches the service,
+  # as with upstream. A missing file is created as an empty template that rejects
   # everyone until it names a user. Edits are picked up automatically;
   # SIGHUP reloads at once. See README "Authentication and model access".
   users_file: ""
@@ -81,9 +82,10 @@ auth:
   # Take the client address from X-Forwarded-For / X-Real-IP. Only behind a
   # trusted reverse proxy.
   trust_forwarded: false
-  anonymous:
-    # With authentication off, limit callers to the default model plus
-    # these patterns. Off by default: anonymous may use every model.
+  admin:
+    # Admin access is every request without checked credentials (auth off,
+    # an unprotected path, http.open_listen). restrict limits it to the
+    # default model plus these patterns. Off by default: every model.
     restrict: false
     models: []
   rate_limit:
@@ -97,7 +99,7 @@ auth:
     user: ""
     allow_cidrs: [] # e.g. ["192.168.1.0/24"]; empty allows every source
   # Usage accounting, see README "Usage accounting". It works with
-  # authentication off too (the user is then "anonymous").
+  # authentication off too (the user is then "admin").
   usage:
     # Per-user totals across restarts. "" falls back to default_totals_file.
     totals_file: ""

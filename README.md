@@ -367,7 +367,13 @@ waiting for a worker.
 ## Authentication and model access
 
 Authentication is off until `auth.users_file` is set. While it is off,
-every caller is anonymous and may use every model, as with upstream.
+every request has admin access and may use every model, as with upstream:
+the service trusts its callers because the network restricts who can reach
+it. The same admin access applies, with authentication on, to paths outside
+`auth.protected_paths` and to the optional second listener
+`http.open_listen`, which serves the same routes without authentication.
+`auth.admin.restrict` and `auth.admin.models` limit admin access to the
+default model plus the listed patterns.
 
 To turn it on with compose:
 
@@ -538,8 +544,11 @@ curl -H "Authorization: Bearer $ADMIN_KEY" "http://localhost:9000/_hub/usage?use
 ```
 
 **With authentication off**, accounting still works: all HTTP jobs are
-recorded for the user `anonymous`, and Wyoming jobs for the name in
-`auth.wyoming.user` (`anonymous` when it is empty). The log line, the
+recorded for the user `admin`, and Wyoming jobs for the name in
+`auth.wyoming.user` (`admin` when it is empty). Jobs without credentials
+while authentication is on (unprotected paths, `http.open_listen`) are
+recorded for `admin` too, in the same entry as a users file account named
+`admin` if there is one. The log line, the
 request log file and the totals file behave as described. Only
 `/_hub/usage` is unavailable (403), because there is no admin to
 authenticate; read the totals file instead.

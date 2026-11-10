@@ -175,6 +175,16 @@ func TestImageTotalsDefaultDoesNotOverrideFile(t *testing.T) {
 	}
 }
 
+// Access without credentials is admin access; its model restriction lives
+// under auth.admin.
+func TestAdminAccessSection(t *testing.T) {
+	file := writeFile(t, "auth: {admin: {restrict: true, models: [base]}}\n")
+	a := load(t, []string{"--config", file}, envOf("WHISPER_HUB_AUTH_ADMIN_MODELS", "tiny,base")).Auth
+	if !a.Admin.Restrict || !slices.Equal(a.Admin.Models, []string{"tiny", "base"}) {
+		t.Errorf("auth.admin = %+v", a.Admin)
+	}
+}
+
 func TestExampleConfigParses(t *testing.T) {
 	_, self, _, _ := runtime.Caller(0)
 	example := filepath.Join(filepath.Dir(self), "..", "..", "deploy", "whisper-hub.example.yaml")
@@ -203,8 +213,8 @@ var zeroByDefault = map[string]bool{
 	"hub.aliases.whisper-1":          true, // "" is the default model
 	"auth.users_file":                true,
 	"auth.trust_forwarded":           true,
-	"auth.anonymous.restrict":        true,
-	"auth.anonymous.models":          true,
+	"auth.admin.restrict":            true,
+	"auth.admin.models":              true,
 	"auth.wyoming.user":              true,
 	"auth.wyoming.allow_cidrs":       true,
 	"auth.usage.totals_file":         true,

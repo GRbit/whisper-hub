@@ -9,8 +9,8 @@ import (
 
 func TestAllowModel(t *testing.T) {
 	open := newAuth(t, Config{})
-	restricted := newAuth(t, Config{Anonymous: AnonymousConfig{Restrict: true, Models: []string{"base"}}})
-	anon := core.IdentityFrom(t.Context())
+	restricted := newAuth(t, Config{Admin: AdminConfig{Restrict: true, Models: []string{"base"}}})
+	netAdmin := core.IdentityFrom(t.Context())
 	user := func(models ...string) *core.Identity { return &core.Identity{User: "u", Models: models} }
 
 	cases := []struct {
@@ -34,11 +34,11 @@ func TestAllowModel(t *testing.T) {
 		{"inner globs miss", open, user("a*b*c"), "aXXbYY", false, false},
 		{"second pattern matches", open, user("small", "medium"), "medium", false, true},
 		{"star grants all", open, user("*"), "whatever/model", false, true},
-		{"anonymous unrestricted", open, anon, "large-v3", false, true},
-		{"nil identity is anonymous", open, nil, "large-v3", false, true},
-		{"anonymous restricted: default", restricted, anon, "tiny", true, true},
-		{"anonymous restricted: granted", restricted, anon, "base", false, true},
-		{"anonymous restricted: denied", restricted, anon, "large-v3", false, false},
+		{"network admin unrestricted", open, netAdmin, "large-v3", false, true},
+		{"nil identity is network admin", open, nil, "large-v3", false, true},
+		{"network admin restricted: default", restricted, netAdmin, "tiny", true, true},
+		{"network admin restricted: granted", restricted, netAdmin, "base", false, true},
+		{"network admin restricted: denied", restricted, netAdmin, "large-v3", false, false},
 		{"restriction does not touch users", restricted, user("*"), "large-v3", false, true},
 	}
 	for _, tc := range cases {

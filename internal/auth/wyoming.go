@@ -34,10 +34,10 @@ func (a *Auth) WyomingIdentity(remote net.Addr) (*core.Identity, error) {
 	if a.authn == nil {
 		name := a.cfg.Wyoming.User
 		if name == "" {
-			name = "anonymous"
+			name = core.NetworkAdminUser
 		}
-		slog.Debug("auth: wyoming connection accepted as anonymous", "remote", addrString(remote), "user", name)
-		return &core.Identity{User: name, Anonymous: true}, nil
+		slog.Debug("auth: wyoming connection accepted with admin access", "remote", addrString(remote), "user", name)
+		return &core.Identity{User: name, NetworkAdmin: true}, nil
 	}
 
 	name := a.cfg.Wyoming.User

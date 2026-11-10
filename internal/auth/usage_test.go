@@ -70,10 +70,10 @@ func TestTotalsAccounting(t *testing.T) {
 	}
 }
 
-func TestEmptyUserIsBilledAsAnonymous(t *testing.T) {
+func TestEmptyUserIsBilledAsAdmin(t *testing.T) {
 	a := usageAuth(t, UsageConfig{})
 	a.Record(context.Background(), okEvent("", core.ProtocolWyoming, "tiny", 1))
-	if a.Totals()["anonymous"].Requests != 1 {
+	if a.Totals()["admin"].Requests != 1 {
 		t.Errorf("totals = %+v", a.Totals())
 	}
 }

@@ -50,8 +50,8 @@ func New(cfg Config, rejecters map[string]func(w http.ResponseWriter, err error)
 		rejecters: maps.Clone(rejecters)}
 
 	if cfg.UsersFile == "" {
-		slog.Info("auth: authentication is off (no users file configured), every caller is anonymous",
-			"anonymous_restricted", cfg.Anonymous.Restrict)
+		slog.Info("auth: authentication is off (no users file configured), every caller has admin access",
+			"admin_restricted", cfg.Admin.Restrict)
 		return a, nil
 	}
 	cache := newCredCache()
@@ -108,7 +108,7 @@ func (a *Auth) Run(ctx context.Context) {
 func (a *Auth) Close() error { return a.rec.Close() }
 
 // Record implements core.UsageRecorder. It works with authentication off
-// too, billing the caller's name (empty -> "anonymous"). The request log
+// too, billing the caller's name (empty -> core.NetworkAdminUser). The request log
 // line is written synchronously: one write(2) of a few hundred bytes per job
 // is cheap next to a transcription, but a stalled disk would stall callers.
 func (a *Auth) Record(ctx context.Context, ev core.UsageEvent) { a.rec.Record(ctx, ev) }
@@ -119,19 +119,19 @@ func (a *Auth) Totals() map[string]UserTotals { return a.rec.Totals() }
 // AllowModel implements core.Authorizer.
 //
 // Authenticated users always get the default model plus whatever their
-// models patterns match. Anonymous callers get everything unless
-// anonymous.restrict is set, in which case they are treated like a user
-// whose patterns are anonymous.models.
+// models patterns match. Admin access without credentials gets everything
+// unless admin.restrict is set, in which case it is treated like a user
+// whose patterns are admin.models.
 func (a *Auth) AllowModel(id *core.Identity, model string, isDefault bool) bool {
 	var allowed bool
 	switch {
-	case id == nil || id.Anonymous:
-		allowed = !a.cfg.Anonymous.Restrict || isDefault || matchAny(a.cfg.Anonymous.Models, model)
+	case id == nil || id.NetworkAdmin:
+		allowed = !a.cfg.Admin.Restrict || isDefault || matchAny(a.cfg.Admin.Models, model)
 	default:
 		allowed = isDefault || matchAny(id.Models, model)
 	}
 	if !allowed {
-		user := "anonymous"
+		user := core.NetworkAdminUser
 		if id != nil {
 			user = id.User
 		}

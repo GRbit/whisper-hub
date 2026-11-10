@@ -169,7 +169,7 @@ func TestMissingCredentialsDoNotCountAsFailures(t *testing.T) {
 		serve(h, from(httptest.NewRequest(http.MethodPost, "/asr", nil), "10.0.0.1"))
 	}
 	if w := serve(h, from(basicReq("bob", "hunter2"), "10.0.0.1")); w.Code != 200 {
-		t.Errorf("status %d after anonymous probes, want 200", w.Code)
+		t.Errorf("status %d after probes without credentials, want 200", w.Code)
 	}
 }
 

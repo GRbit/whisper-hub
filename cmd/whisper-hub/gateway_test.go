@@ -341,8 +341,8 @@ func TestAuthOffOpenAIAndWyoming(t *testing.T) {
 		t.Fatalf("usage endpoint with auth off: %d", code)
 	}
 	lines := readLog(t, logFile)
-	if !hasLine(lines, "user", "anonymous", "protocol", "openai", "status", "ok", "model", "tiny") ||
-		!hasLine(lines, "user", "anonymous", "protocol", "wyoming", "status", "ok") {
+	if !hasLine(lines, "user", "admin", "protocol", "openai", "status", "ok", "model", "tiny") ||
+		!hasLine(lines, "user", "admin", "protocol", "wyoming", "status", "ok") {
 		t.Fatalf("usage log %v", lines)
 	}
 }

@@ -474,13 +474,13 @@ func TestIdentityInModelsContext(t *testing.T) {
 	}
 }
 
-func TestAnonymousWhenNoIdentify(t *testing.T) {
+func TestNetworkAdminWhenNoIdentify(t *testing.T) {
 	svc := newFakeService()
 	h := startServer(t, Config{}, svc, nil)
 	c := h.dial()
 	c.utterance(16000, 2, 1, pcm(320))
 	c.recv()
-	if id := svc.Calls()[0].id; !id.Anonymous {
+	if id := svc.Calls()[0].id; !id.NetworkAdmin {
 		t.Errorf("identity %+v", id)
 	}
 }
