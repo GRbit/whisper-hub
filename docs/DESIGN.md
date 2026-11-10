@@ -29,7 +29,9 @@ clients --> gateway (Go, one static binary)            --> engine worker(s) (Pyt
 - A worker serves one engine and one or more models. Several workers can be
   attached (for example faster-whisper and whisperx in separate containers).
 - Shipping: an all-in-one image per engine (`deploy/Dockerfile`, gateway +
-  worker, drop-in replacement for the upstream image), a gateway-only image
+  worker, drop-in replacement for the upstream image), `whisper-hub:all`
+  with every engine installed (`ENGINE=all`, `ASR_ENGINE` picks one per
+  container start, unset means `openai_whisper` as upstream), a gateway-only image
   (`deploy/Dockerfile.gateway`), worker images (`worker/Dockerfile`), and
   compose files for both setups. Both Go images ship upstream's ffmpeg build
   (`onerahmet/ffmpeg:n7.1`), so uploads decode to the same PCM as upstream.
@@ -37,8 +39,12 @@ clients --> gateway (Go, one static binary)            --> engine worker(s) (Pyt
   worker as its child (`internal/workerproc`, configured by `worker.command`).
   Signals reach the process that knows the shutdown order (drain HTTP and
   Wyoming, then stop the worker); the gateway exits when the worker dies,
-  so the container restarts. `ASR_ENGINE` unset means the image's engine; a
-  different one fails at startup naming the image that has it.
+  so the container restarts. On a single-engine image `ASR_ENGINE` unset
+  means the image's engine and a different one fails at startup naming the
+  image that has it.
+- CI (`.github/workflows`): `ci.yml` (Go checks, worker pytest, fake-engine
+  end-to-end runs) and `images.yml` (every image including the CUDA ones,
+  pushed to ghcr.io/grbit on master and v* tags, layer cache on ghcr.io).
 
 ## Repository layout and ownership
 

@@ -7,7 +7,8 @@ once, in front of Whisper engine workers:
   [whisper-asr-webservice](https://github.com/ahmetoner/whisper-asr-webservice)
   (`/asr`, `/detect-language`, `/docs`). Byte-for-byte compatible: on the same
   uploads, our image and the upstream image return identical status codes,
-  headers and bodies (see [Compatibility](#compatibility)).
+  headers and bodies, except where upstream is not deterministic itself or
+  answers 500 (see [Compatibility](#compatibility)).
 - **OpenAI**: `/v1/audio/transcriptions`, `/v1/audio/translations`,
   `/v1/models`, at the level of `whisper-1`. Official SDKs work unchanged.
 - **Wyoming**: the TCP protocol of Home Assistant voice pipelines (port 10300).
@@ -32,40 +33,80 @@ All-in-one image, a drop-in for the upstream image: same port, same
 environment variables and flags, same model cache path.
 
 ```bash
-make image                                   # whisper-hub:faster_whisper
 docker run -d -p 9000:9000 -p 10300:10300 -e ASR_MODEL=base \
-  -v whisper-cache:/root/.cache whisper-hub:faster_whisper
+  -v whisper-cache:/root/.cache ghcr.io/grbit/whisper-hub:latest
 curl -F "audio_file=@meeting.mp3" "http://localhost:9000/asr?output=txt"
 ```
 
-Or with compose: `docker compose -f deploy/docker-compose.yml up -d`.
+Or with compose: `docker compose -f deploy/docker-compose.yml up -d`; to
+build locally instead of pulling: `make image` (everything builds inside
+docker, no host toolchain needed).
 
-Images (everything builds inside docker, no host toolchain needed):
+### Images and tags
 
-| Image | Make target | Size | Contents |
-|---|---|---|---|
-| `whisper-hub:faster_whisper` | `make image` | 0.8 GB | gateway + faster_whisper worker (no torch) |
-| `whisper-hub:<engine>` | `make image ENGINE=whisperx` | larger (torch) | gateway + whisperx or openai_whisper worker |
-| `whisper-hub:<engine>-gpu` | `make image-gpu` | | CUDA variant, **not tested** (no GPU available) |
-| `whisper-hub-gateway:latest` | `make image-gateway` | 150 MB | gateway only, uid 65532 |
-| `whisper-hub-worker:<engine>` | `make image-worker` | 0.8 GB (faster_whisper) | worker only, see [worker/README.md](worker/README.md) |
+Published to `ghcr.io/grbit/` by CI, amd64 only:
+
+| Image | Size | Contents |
+|---|---|---|
+| `whisper-hub:faster_whisper` (`latest`) | 0.8 GB | gateway + faster_whisper worker (no torch) |
+| `whisper-hub:openai_whisper` | 2.7 GB | gateway + openai_whisper worker |
+| `whisper-hub:whisperx` | 3.7 GB | gateway + whisperx worker |
+| `whisper-hub:all` | 4.0 GB | gateway + all three engines; `ASR_ENGINE` picks one at startup |
+| `whisper-hub:<engine>-gpu` | about 7 GB (faster_whisper) to 15 GB (all) | CUDA variants of the four above, see [GPU](#gpu) |
+| `whisper-hub-worker:<engine>-gpu` | about 7 to 14 GB | CUDA workers (faster_whisper, openai_whisper, whisperx) |
+| `whisper-hub-gateway` | 150 MB | gateway only (split setup), uid 65532 |
+| `whisper-hub-worker:<engine>` | | worker only (split setup), see [worker/README.md](worker/README.md) |
+
+Tags, per image (`<variant>` is the engine, empty for the gateway):
+
+| Tag | Points at |
+|---|---|
+| `latest` | the latest release of `whisper-hub:faster_whisper` (and of the gateway) |
+| `<variant>`, e.g. `whisperx`, `all` | the latest release of that variant |
+| `1.2.3-<variant>`, `1.2.3` | a release (`v1.2.3` git tag); the plain version is faster_whisper |
+| `edge-<variant>`, `edge` | the current `master` |
+| `sha-<commit>-<variant>` | one `master` commit |
+| `<variant>-gpu`, `1.2.3-<variant>-gpu`, `edge-<variant>-gpu`, `sha-<commit>-<variant>-gpu` | the same for the CUDA builds, published on the same events; there is no plain `latest-gpu` |
+
+### Choosing the engine
+
+- **By tag**: `whisper-hub:faster_whisper`, `:openai_whisper`, `:whisperx`.
+  Smaller images; `ASR_ENGINE` unset means the image's engine
+  (**deviation:** upstream defaults to `openai_whisper`), and asking for an
+  engine the image lacks fails at startup naming the image to use.
+- **By `ASR_ENGINE` on `whisper-hub:all`**: exactly like upstream, one image
+  for every engine, `ASR_ENGINE` unset means `openai_whisper`. One engine
+  runs per container start.
 
 Split setup (gateway and workers in separate containers, any number of
 workers and engines): `docker compose -f deploy/docker-compose.split.yml up -d`.
 
+### GPU
+
+The `-gpu` images run on the CUDA 12.9 runtime and need the NVIDIA
+Container Toolkit on the host:
+
+```bash
+docker run -d --gpus all -p 9000:9000 -p 10300:10300 \
+  -e ASR_MODEL=large-v3 -e ASR_QUANTIZATION=float16 \
+  -v whisper-cache:/root/.cache ghcr.io/grbit/whisper-hub:faster_whisper-gpu
+```
+
+As upstream: `ASR_DEVICE` defaults to `cuda` when a GPU is visible, else
+`cpu`; `ASR_QUANTIZATION` defaults to `float32` with CUDA and `int8`
+without (`float16` or `int8_float16` are the usual choices on a GPU).
+`whisper-hub:all-gpu` takes `ASR_ENGINE` like `whisper-hub:all`. With
+compose, add `deploy.resources.reservations.devices` with
+`capabilities: [gpu]` to the service.
+
 ### The all-in-one container
 
-The gateway is PID 1 and starts the worker as its child. It forwards
-nothing to a shell: on SIGTERM it stops accepting, lets running jobs finish
-(`http.shutdown_grace`, 30s; set `stop_grace_period` longer), then stops the
-worker; if the worker dies, the gateway exits so the container is
-restarted. One process tree, no supervisor script.
+The gateway is PID 1 and starts the worker as its child. On SIGTERM it
+stops accepting, lets running jobs finish (`http.shutdown_grace`, 30s; set
+`stop_grace_period` longer), then stops the worker; if the worker dies, the
+gateway exits so the container is restarted. One process tree, no
+supervisor script.
 
-- `ASR_ENGINE` unset means the image's own engine. **Deviation:** upstream
-  defaults to `openai_whisper`; here the image decides. Asking an image for
-  an engine it lacks (e.g. `ASR_ENGINE=openai_whisper` on
-  `whisper-hub:faster_whisper`) fails at startup with a message naming the
-  image to use.
 - The model loads at startup, as upstream. Unlike upstream, the gateway
   listens at once and answers 503 (`/healthz`, `/asr` with
   `{"detail": ...}`) until the model is ready.
@@ -226,7 +267,7 @@ Replace the image; keep the environment, flags, port and cache volume:
 | Upstream | whisper-hub |
 |---|---|
 | `--host`/`-h`, `--port`/`-p` | the HTTP listener; the image's command may still be `whisper-asr-webservice ...` |
-| `ASR_ENGINE` | must match the image's engine (unset = the image's) |
+| `ASR_ENGINE` | on `whisper-hub:all` exactly as upstream (unset = `openai_whisper`); on a single-engine image it must match (unset = the image's) |
 | `ASR_MODEL`, `ASR_MODEL_PATH`, `ASR_DEVICE`, `ASR_QUANTIZATION`, `MODEL_IDLE_TIMEOUT`, `HF_TOKEN`, `SUBTITLE_*` | passed to the worker, same meaning |
 | `LOG_LEVEL` | both processes (`WARNING` -> warn, `CRITICAL` -> error) |
 | `UPLOAD_SPOOL_DIR`, `DEBUG_FAILED_UPLOADS_DIR` | gateway ffmpeg spool and failed-upload dumps, same meaning |
@@ -260,26 +301,48 @@ The 401 on legacy paths is byte-identical to the old proxy's;
 
 ## Compatibility
 
-What was verified, with the scripts in `deploy/e2e/` (`make e2e`):
+What was verified, with the scripts in `deploy/e2e/`, on CPU with model
+`tiny`:
 
 - **Legacy, byte for byte** (`make e2e-fidelity`): the reference image
-  (upstream + upstream's sidecar branch, faster_whisper, `tiny`, int8)
+  (upstream + upstream's sidecar branch, same engine, `tiny`, int8)
   against our all-in-one image, the same original uploads (wav, mp3, ogg,
   m4a with a trailing moov atom) with `encode=true`, every output format,
   with options default, `word_timestamps`, `vad_filter`, `language`,
-  `task=translate`, `initial_prompt`, plus `/detect-language`: 155 of 155
-  responses identical in status, headers and body.
-- **Real clients**: the openai Python SDK, the `wyoming` package with a Home
-  Assistant STT replay and zeroconf discovery, and the request shapes of
-  existing whisper-asr-webservice clients (`POST
+  `task=translate`, `initial_prompt`, plus `/detect-language`: 155
+  responses per run, compared in status, headers and body.
+- **Real clients** (`make e2e-real`, `e2e-fake`, `e2e-clients`): the openai
+  Python SDK, the `wyoming` package with a Home Assistant STT replay and
+  zeroconf discovery, and the request shapes of existing
+  whisper-asr-webservice clients (`POST
   /asr?task=transcribe&output=txt&encode=true[&language=..][&vad_filter=true]`,
   `output=json` reading `text`), with and without Basic auth through the old
-  `SIDECAR_*` settings; with a fake engine and with a real `tiny` model.
-- **Not verified here**: GPU images, the whisperx and openai_whisper engines
-  through the gateway (their images were not built in this round),
-  diarization, a live Home Assistant instance, a recording
-  actually made by Android MediaMuxer (an ffmpeg-made m4a with the same
-  trailing-moov layout was used).
+  `SIDECAR_*` settings.
+
+| Image | `ASR_ENGINE` | Real audio (`stack.sh real`) | Legacy fidelity (155 responses) |
+|---|---|---|---|
+| `whisper-hub:faster_whisper` | | 47/47 | 155 identical |
+| `whisper-hub:openai_whisper` | | 47/47 | 130 identical, 25 where upstream disagrees with itself between two runs, 0 unexplained |
+| `whisper-hub:whisperx` | | 47/47 | 130 identical, 25 where upstream answers 500 to `initial_prompt` and we answer, 0 unexplained |
+| `whisper-hub:all` | unset (`openai_whisper`) | 47/47 | 130 identical, 25 where upstream disagrees with itself, 0 unexplained |
+| `whisper-hub:all` | `faster_whisper` | 47/47 | 155 identical |
+| `whisper-hub:all` | `openai_whisper` | 47/47 | 130 identical, 25 where upstream disagrees with itself, 0 unexplained |
+| `whisper-hub:all` | `whisperx` | 47/47 | not run; covered by the package check below |
+
+- **`whisper-hub:all` package check** (`make e2e-packages`): every package
+  of the three single-engine images is installed in `:all` at the same
+  version (27, 36 and 113 packages, 0 differences). With the same worker
+  code, `:all` behaves like the single-engine image for each engine, so its
+  fidelity runs are not part of `make e2e-engines`.
+- openai_whisper is not deterministic upstream on some inputs (temperature
+  fallback); the fidelity script runs the reference twice (`REF_TWICE=1`)
+  and reports the cases where it disagrees with itself separately.
+- With the fake engine (gateway image + Python fake worker): 47/47,
+  including streaming, client-disconnect cancellation, priority from the
+  usage log, and auth on and off.
+- **Not verified here**: diarization, a live Home Assistant instance, a
+  recording actually made by Android MediaMuxer (an ffmpeg-made m4a with
+  the same trailing-moov layout was used).
 
 ### Known differences from upstream
 
@@ -288,7 +351,8 @@ Legacy API:
 - Ready before the model: 503 with `{"detail": ...}` while the worker loads,
   where upstream does not listen yet. `/healthz` is new.
 - No `Server: uvicorn` header; header names in canonical case.
-- `ASR_ENGINE` unset means the image's engine, not `openai_whisper`.
+- On the single-engine images, `ASR_ENGINE` unset means the image's
+  engine, not `openai_whisper` (`whisper-hub:all` behaves as upstream).
 - whisperx with `initial_prompt` works; upstream answers 500 (its whisperx
   version rejects the argument).
 - Kept for fidelity although odd: whisperx diarization passes
@@ -345,6 +409,11 @@ make e2e-clients   # owners' openai SDK / wyoming / HA / zeroconf scripts, canne
 make e2e-fake      # gateway + Python fake worker: protocols, streaming, cancellation, priority, auth
 make e2e-real      # all-in-one, model tiny, real audio; sidecar compatibility mode
 make e2e-fidelity  # byte-for-byte legacy comparison with the reference image
+make e2e-packages  # whisper-hub:all has every single-engine package at the same version
+make e2e-engines   # all of the above per engine image, and :all per ASR_ENGINE
 ```
+
+`ENGINE=<engine>` selects the image for `e2e-real` and `e2e-fidelity`
+(`whisper-hub:$ENGINE`); `ASR_ENGINE` is passed to it.
 
 Design and conventions: [`docs/DESIGN.md`](docs/DESIGN.md).
