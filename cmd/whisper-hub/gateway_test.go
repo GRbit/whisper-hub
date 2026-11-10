@@ -336,9 +336,12 @@ func TestAuthOffOpenAIAndWyoming(t *testing.T) {
 	if ev.Type != "transcript" || !strings.Contains(fmt.Sprint(ev.Data["text"]), "s0") {
 		t.Fatalf("wyoming: %+v", ev)
 	}
-	// Usage endpoint has no admin to check while auth is off.
-	if code, _ := getJSON(t, r.base+auth.UsagePath, none); code != http.StatusForbidden {
-		t.Fatalf("usage endpoint with auth off: %d", code)
+	// With auth off every caller has admin access, so usage is served;
+	// Wyoming jobs are counted under admin, per protocol.
+	code, out = getJSON(t, r.base+auth.UsagePath, none)
+	adm, _ := out["users"].(map[string]any)["admin"].(map[string]any)
+	if code != http.StatusOK || fmt.Sprint(adm["by_protocol"].(map[string]any)["wyoming"].(map[string]any)["requests"]) != "1" {
+		t.Fatalf("usage endpoint with auth off: %d %v", code, out)
 	}
 	lines := readLog(t, logFile)
 	if !hasLine(lines, "user", "admin", "protocol", "openai", "status", "ok", "model", "tiny") ||
@@ -374,6 +377,7 @@ func TestAuthOnAccessControlAndUsage(t *testing.T) {
 		"WHISPER_HUB_AUTH_USERS_FILE":     users,
 		"WHISPER_HUB_AUTH_USAGE_LOG_FILE": logFile,
 		"WHISPER_HUB_AUTH_WYOMING_USER":   "bob",
+		"WHISPER_HUB_HTTP_OPEN_LISTEN":    "127.0.0.1:0",
 	})
 	alice, bob, carol := bearer(aliceKey), basic("bob", "bob-secret"), bearer(carolKey)
 
@@ -415,6 +419,10 @@ func TestAuthOnAccessControlAndUsage(t *testing.T) {
 	code, out = getJSON(t, r.base+auth.UsagePath, carol)
 	if code != http.StatusOK {
 		t.Fatalf("admin usage: %d %v", code, out)
+	}
+	// The admin port serves usage without credentials.
+	if code, _ := getJSON(t, "http://"+r.g.openAddr()+auth.UsagePath, none); code != http.StatusOK {
+		t.Fatalf("usage on the admin port: %d", code)
 	}
 	us := out["users"].(map[string]any)
 	if fmt.Sprint(us["alice"].(map[string]any)["ok_requests"]) != "1" ||

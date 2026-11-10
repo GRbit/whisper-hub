@@ -2,7 +2,8 @@
 #   whisper-hub hash     -> password_hash (asks for the password, no echo)
 #   whisper-hub apikey   -> a key to hand out once, and its sha256: hash for api_keys
 # Every user may use the default model; "models" grants more (exact ids or
-# "*" globs). "admin" may read GET /_hub/usage.
+# "*" globs). "admin: true" may read GET /_hub/usage on the authenticated
+# listener.
 users:
   - name: alice
     password_hash: "$2a$12$REPLACE.WITH.OUTPUT.OF.whisper-hub.hash........"

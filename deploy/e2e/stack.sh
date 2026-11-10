@@ -87,6 +87,8 @@ if [ "$mode" = fake ]; then
 
 	echo "== fake worker, auth off"
 	check --mode fake --http http://whub-s-gw:9000 --wyoming whub-s-gw:10300 || status=1
+	code=$(docker run --rm --network "$net" --entrypoint python3 "$e2e_image" -c "import urllib.request; print(urllib.request.urlopen('http://whub-s-gw:9000/_hub/usage').status)" 2>/dev/null || true)
+	[ "$code" = 200 ] && echo "ok   usage endpoint with auth off -> 200" || { echo "FAIL usage endpoint with auth off -> $code"; status=1; }
 	echo "== usage log: priority order"
 	# The log is private to the gateway user (0600), so read it through the container.
 	docker exec whub-s-gw cat /data/requests.jsonl >"$work/requests.jsonl"

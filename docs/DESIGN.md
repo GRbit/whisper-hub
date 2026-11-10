@@ -399,8 +399,10 @@ The totals are written to `auth.usage.totals_file` (while it is unset, to
 `auth.usage.default_totals_file`, which the images point at
 `/data/usage.json`) atomically (temporary file, fsync, rename) every
 `auth.usage.snapshot_interval` when they changed, and once more at
-shutdown. They are served to admin users at
-`GET /_hub/usage`.
+shutdown. They are served at `GET /_hub/usage` to admin access by network
+(authentication off, or the `http.open_listen` admin port) and to users
+with `admin: true`; on the authenticated listener the endpoint checks
+credentials itself, independent of `auth.protected_paths`.
 
 Requests that never become a job are not usage: a failed login, an invalid
 parameter, an upload that does not decode. Failed logins are written to the

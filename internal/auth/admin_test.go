@@ -62,9 +62,35 @@ func TestUsageHandler(t *testing.T) {
 	}
 }
 
+// Admin access by network gets the usage too: every request while
+// authentication is off.
 func TestUsageHandlerWithAuthOff(t *testing.T) {
 	a := newAuth(t, Config{})
-	if w := serve(a.UsageHandler(), usageReq("", "")); w.Code != http.StatusForbidden {
-		t.Errorf("auth off: %d, want 403", w.Code)
+	a.Record(context.Background(), okEvent("", core.ProtocolWyoming, "tiny", 2))
+	w := serve(a.UsageHandler(), usageReq("", ""))
+	var body usageBody
+	_ = json.Unmarshal(w.Body.Bytes(), &body)
+	if w.Code != http.StatusOK || body.Users[core.NetworkAdminUser].ByProtocol[core.ProtocolWyoming].Requests != 1 {
+		t.Errorf("auth off: %d %s", w.Code, w.Body.String())
+	}
+}
+
+// With authentication on, the admin port (http.open_listen) serves usage
+// without credentials, while the authenticated listener still demands an
+// admin user, whatever protected_paths says.
+func TestUsageHandlerOnAdminPort(t *testing.T) {
+	a := newAuth(t, Config{UsersFile: writeFile(t, validUsers(t)), PollInterval: -1,
+		RateLimit: RateLimitConfig{Failures: -1}, ProtectedPaths: []string{"/v1/"}})
+	mux := http.NewServeMux()
+	mux.Handle(UsagePath, a.UsageHandler())
+	if w := serve(a.AdminPort(mux), usageReq("", "")); w.Code != http.StatusOK {
+		t.Errorf("admin port: %d %s", w.Code, w.Body.String())
+	}
+	main := a.Middleware(mux)
+	if w := serve(main, usageReq("", "")); w.Code != http.StatusUnauthorized {
+		t.Errorf("main listener, unprotected path, no credentials: %d", w.Code)
+	}
+	if w := serve(main, usageReq("bob", "hunter2")); w.Code != http.StatusForbidden {
+		t.Errorf("main listener, non-admin: %d", w.Code)
 	}
 }

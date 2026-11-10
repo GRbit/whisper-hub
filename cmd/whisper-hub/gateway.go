@@ -76,8 +76,8 @@ func newGateway(ctx context.Context, cfg config.Config, log *slog.Logger) (_ *ga
 	}
 	if cfg.HTTP.OpenListen != "" {
 		// Deliberately without the auth middleware: the network decides who
-		// reaches this listener.
-		if err := g.listenHTTP(cfg.HTTP.OpenListen, mux); err != nil {
+		// reaches this listener, the admin port.
+		if err := g.listenHTTP(cfg.HTTP.OpenListen, g.auth.AdminPort(mux)); err != nil {
 			return nil, err
 		}
 	}

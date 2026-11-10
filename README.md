@@ -451,7 +451,7 @@ There are four places to read it:
 | Log line `job finished` on stderr | yes | one line per job |
 | Request log file | no: set `auth.usage.log_file` | one JSON line per job, and one per rejected login |
 | Totals file | in the images: `/data/usage.json`; the bare binary: set `auth.usage.totals_file` | running totals per user, kept across restarts |
-| `GET /_hub/usage` | needs authentication on, and an admin user | the current totals per user |
+| `GET /_hub/usage` | for admin access: always while authentication is off; with it on, on the admin port `http.open_listen` or for a user with `admin: true` | the current totals per user |
 
 Every image that contains the gateway declares `/data` as a volume and
 writes the totals to `/data/usage.json` there; mount a named volume on
@@ -537,8 +537,11 @@ jq 'map_values(.audio_seconds / 3600)' usage.json    # hours of audio per user
 ```
 
 **The admin endpoint** returns the same totals, current to the second, as
-`{"users": {"<name>": {...}}}`. It needs the credentials of a user with
-`admin: true`; `?user=<name>` narrows the answer to one user:
+`{"users": {"<name>": {...}}}`. It is served to admin access: every
+request while authentication is off, and every request on the admin port
+`http.open_listen`. On the authenticated listener it needs the credentials
+of a user with `admin: true`, whatever `auth.protected_paths` says; other
+users get 403. `?user=<name>` narrows the answer to one user:
 
 ```bash
 curl -H "Authorization: Bearer $ADMIN_KEY" "http://localhost:9000/_hub/usage?user=alice"
@@ -549,10 +552,8 @@ recorded for the user `admin`, and Wyoming jobs for the name in
 `auth.wyoming.user` (`admin` when it is empty). Jobs without credentials
 while authentication is on (unprotected paths, `http.open_listen`) are
 recorded for `admin` too, in the same entry as a users file account named
-`admin` if there is one. The log line, the
-request log file and the totals file behave as described. Only
-`/_hub/usage` is unavailable (403), because there is no admin to
-authenticate; read the totals file instead.
+`admin` if there is one. The log line, the request log file, the totals
+file and `/_hub/usage` behave as described.
 
 ## Migrating from whisper-asr-webservice
 
