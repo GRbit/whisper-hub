@@ -1,8 +1,8 @@
 """Hugging Face URL support for ASR_MODEL / WORKER_MODELS.
 
-Ported from whisper-asr-webservice (upstream branch main,
-app/asr_models/model_resolver.py), MIT License,
-Copyright (c) 2022 Ahmet Oner & Besim Alibegovic. Behavior is unchanged.
+A whisper-hub extension: upstream whisper-asr-webservice takes model names
+and local paths only. MIT License, Copyright (c) 2022 Ahmet Oner & Besim
+Alibegovic.
 """
 
 import logging

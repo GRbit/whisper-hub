@@ -1,8 +1,8 @@
 """Legacy /asr output writers used by upstream for the faster_whisper engine.
 
-Copied from whisper-asr-webservice (upstream branch main): the writer
-classes from app/utils.py and the dispatch from
-app/asr_models/faster_whisper_engine.py write_result. MIT License,
+Copied from whisper-asr-webservice (main, see
+deploy/e2e/reference/upstream.env): the writer classes from app/utils.py
+and the dispatch from app/asr_models/faster_whisper_engine.py write_result. MIT License,
 Copyright (c) 2022 Ahmet Oner & Besim Alibegovic.
 
 format_timestamp is copied from faster_whisper/utils.py (faster-whisper

@@ -1,4 +1,5 @@
-# Exact versions from the reference image whisper-asr-webservice:ec32cd5 (pip freeze),
+# Exact versions installed by the reference image (`make image-reference`:
+# public whisper-asr-webservice at the commit in deploy/e2e/reference/upstream.env, pip freeze),
 # so every engine runs the library code upstream runs. Local labels (+cpu) are
 # dropped so the same file constrains CUDA builds. triton is not here: CUDA
 # torch pins its own version, see constraints-cpu.txt.

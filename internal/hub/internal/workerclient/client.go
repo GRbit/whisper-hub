@@ -1,5 +1,5 @@
 // Package workerclient talks to one Python engine worker over the internal
-// Worker API described in docs/DESIGN.md.
+// Worker API described in docs/worker-api.md.
 package workerclient
 
 import (

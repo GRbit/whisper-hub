@@ -1,5 +1,5 @@
-# Ported from whisper-asr-webservice (upstream branch main) tests/test_model_resolver.py,
-# MIT License, Copyright (c) 2022 Ahmet Oner & Besim Alibegovic.
+# Tests of the Hugging Face URL support (a whisper-hub extension, see
+# whisper_worker/model_resolver.py). MIT License, Copyright (c) 2022 Ahmet Oner & Besim Alibegovic.
 import pytest
 
 from whisper_worker import model_resolver

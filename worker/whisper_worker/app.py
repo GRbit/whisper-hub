@@ -1,4 +1,4 @@
-"""Worker HTTP API as a plain ASGI application (see docs/DESIGN.md, "Worker API").
+"""Worker HTTP API as a plain ASGI application (see docs/worker-api.md).
 
 Plain ASGI instead of a framework because the transcribe stream needs to
 watch for http.disconnect itself while it writes, which frameworks hide.
