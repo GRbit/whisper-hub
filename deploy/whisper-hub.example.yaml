@@ -9,13 +9,17 @@
 # WHISPER_HUB_HUB_QUEUE_LENGTH. Lists are comma separated, maps are
 # key=value pairs, hub.workers takes YAML flow syntax.
 # Precedence: defaults < this file < environment < command line flags.
+# Within the environment, WHISPER_HUB_* variables win over the variables of
+# whisper-asr-webservice and its sidecar (LOG_LEVEL, SIDECAR_*, ...).
+# An unknown key in this file is an error.
 
 http:
   # Main listener: legacy API, OpenAI API, /healthz and the usage endpoint.
   # The upstream --host/--port flags override it.
   listen: ":9000"
   # Optional second listener serving the same routes WITHOUT authentication,
-  # like the webservice port of the old bundled sidecar setup. Off when "".
+  # like the open webservice port of an sidecar deployment (see README,
+  # "From the sidecar sidecar"). Off when "".
   open_listen: ""
   # Running requests may finish for this long after SIGTERM. Give docker a
   # longer stop_grace_period than this, or it kills the process first.
@@ -71,7 +75,7 @@ auth:
   # Users file. Empty turns authentication off (everyone is anonymous, as
   # upstream). A missing file is created as an empty template that rejects
   # everyone until it names a user. Edits are picked up automatically;
-  # SIGHUP reloads at once. See README "Users and model access".
+  # SIGHUP reloads at once. See README "Authentication and model access".
   users_file: ""
   poll_interval: 5s
   realm: whisper # browser login prompt on legacy paths
@@ -86,16 +90,20 @@ auth:
     restrict: false
     models: []
   rate_limit:
-    failures: 10 # failed logins per window before 429; negative disables
+    # Failed logins per window from one client address. Further attempts
+    # in that window get 401 with Retry-After. Negative disables the limit.
+    failures: 10
     window: 1m
   wyoming:
     # Wyoming has no credentials: connections act as this users file entry.
     # With authentication on and no user, Wyoming connections are refused.
     user: ""
     allow_cidrs: [] # e.g. ["192.168.1.0/24"]; empty allows every source
+  # Usage accounting, see README "Usage accounting". It works with
+  # authentication off too (the user is then "anonymous").
   usage:
     totals_file: "" # per-user totals across restarts; "" keeps them in memory
-    snapshot_interval: 30s
+    snapshot_interval: 30s # how often totals_file is rewritten when changed
     log_file: "" # one JSON line per job and per rejected login; "" disables
     log_max_bytes: 0 # rotate at this size; 0 never rotates
     log_max_backups: 5
