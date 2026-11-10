@@ -1,0 +1,191 @@
+name: images
+
+# Builds every image on pull requests (not pushed) and pushes them to
+# ghcr.io/grbit on master (edge, sha-<short>) and on v* tags (version,
+# variant, latest). Tag rules: .github/scripts/image-tags.sh.
+# CUDA images (job gpu, -gpu tags) are built and published the same way.
+# On pull requests they build only when
+# their inputs change (job changes), since each takes long and needs
+# most of the runner's disk.
+# amd64 only: the engines' torch and CTranslate2 wheels were only verified
+# on amd64.
+# Layer cache: ghcr.io (buildcache-<variant> tags), not the 10 GB Actions
+# cache, which torch and CUDA layers do not fit.
+on:
+  push:
+    branches: [master]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: images-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io/grbit
+  # Pull requests and manual runs build only.
+  PUSH: ${{ github.event_name == 'push' }}
+
+jobs:
+  build:
+    name: ${{ matrix.image }}${{ matrix.variant && ':' }}${{ matrix.variant }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # All-in-one: gateway + one engine (or all three).
+          - {image: whisper-hub, file: deploy/Dockerfile, context: ., engine: faster_whisper, variant: faster_whisper, default: true}
+          - {image: whisper-hub, file: deploy/Dockerfile, context: ., engine: openai_whisper, variant: openai_whisper, default: false, heavy: true}
+          - {image: whisper-hub, file: deploy/Dockerfile, context: ., engine: whisperx, variant: whisperx, default: false, heavy: true}
+          - {image: whisper-hub, file: deploy/Dockerfile, context: ., engine: all, variant: all, default: false, heavy: true}
+          - {image: whisper-hub-gateway, file: deploy/Dockerfile.gateway, context: ., engine: '', variant: '', default: true}
+          - {image: whisper-hub-worker, file: worker/Dockerfile, context: worker, engine: faster_whisper, variant: faster_whisper, default: true}
+          - {image: whisper-hub-worker, file: worker/Dockerfile, context: worker, engine: openai_whisper, variant: openai_whisper, default: false, heavy: true}
+          - {image: whisper-hub-worker, file: worker/Dockerfile, context: worker, engine: whisperx, variant: whisperx, default: false, heavy: true}
+          - {image: whisper-hub-worker, file: worker/Dockerfile, context: worker, engine: fake, variant: fake, default: false}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Free disk space (torch images need about 10 GB while building)
+        if: matrix.heavy
+        run: |
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/share/boost
+          docker system prune -af >/dev/null
+          df -h /
+      - name: Tags
+        id: tags
+        run: |
+          {
+            echo 'list<<EOF'
+            .github/scripts/image-tags.sh "$REGISTRY/${{ matrix.image }}" "${{ matrix.variant }}" "${{ matrix.default }}"
+            echo EOF
+          } >>"$GITHUB_OUTPUT"
+          .github/scripts/image-tags.sh "$REGISTRY/${{ matrix.image }}" "${{ matrix.variant }}" "${{ matrix.default }}"
+      - uses: docker/setup-buildx-action@v3
+      - name: Log in to ghcr.io (also reads the layer cache)
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build${{ env.PUSH == 'true' && ' and push' || '' }}
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
+          platforms: linux/amd64
+          build-args: |
+            ENGINE=${{ matrix.engine }}
+            VERSION=${{ github.ref_name }}-${{ github.sha }}
+          tags: ${{ steps.tags.outputs.list }}
+          push: ${{ env.PUSH == 'true' }}
+          # The source label links the ghcr.io package to this repository.
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ github.ref_name }}
+            org.opencontainers.image.title=${{ matrix.image }}${{ matrix.variant && ':' }}${{ matrix.variant }}
+            org.opencontainers.image.description=whisper-hub speech-to-text: legacy whisper-asr-webservice, OpenAI and Wyoming APIs
+          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ matrix.image }}:buildcache${{ matrix.variant && '-' }}${{ matrix.variant }}
+          # Written only when pushing: pull requests may not write packages.
+          cache-to: ${{ env.PUSH == 'true' && format('type=registry,mode=max,ref={0}/{1}:buildcache{2}{3}', env.REGISTRY, matrix.image, matrix.variant && '-' || '', matrix.variant) || '' }}
+
+  changes:
+    name: GPU inputs changed?
+    runs-on: ubuntu-24.04
+    outputs:
+      gpu: ${{ steps.filter.outputs.gpu }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            gpu:
+              - deploy/Dockerfile.gpu
+              - worker/**
+              - cmd/**
+              - internal/**
+              - go.mod
+              - go.sum
+              - .github/workflows/images.yml
+              - .github/scripts/image-tags.sh
+
+  gpu:
+    name: ${{ matrix.image }}:${{ matrix.engine }}-gpu
+    needs: changes
+    # Always on master, tags and manual runs; on pull requests only when
+    # something the CUDA images are built from changed.
+    if: github.event_name != 'pull_request' || needs.changes.outputs.gpu == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    strategy:
+      fail-fast: false
+      # One variant per job; two at a time keeps registry pushes reasonable.
+      max-parallel: 2
+      matrix:
+        include:
+          # Estimated sizes (unpacked): CUDA cudnn-runtime base about 6.5 GB,
+          # faster_whisper about 7 GB, torch variants 13 to 15 GB.
+          - {image: whisper-hub, file: deploy/Dockerfile.gpu, context: ., engine: faster_whisper}
+          - {image: whisper-hub, file: deploy/Dockerfile.gpu, context: ., engine: openai_whisper}
+          - {image: whisper-hub, file: deploy/Dockerfile.gpu, context: ., engine: whisperx}
+          - {image: whisper-hub, file: deploy/Dockerfile.gpu, context: ., engine: all}
+          - {image: whisper-hub-worker, file: worker/Dockerfile.gpu, context: worker, engine: faster_whisper}
+          - {image: whisper-hub-worker, file: worker/Dockerfile.gpu, context: worker, engine: openai_whisper}
+          - {image: whisper-hub-worker, file: worker/Dockerfile.gpu, context: worker, engine: whisperx}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Free disk space (the runner starts with about 14 GB free)
+        run: |
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup \
+            /opt/hostedtoolcache /usr/local/share/boost /usr/local/share/powershell /usr/share/swift \
+            /usr/local/lib/node_modules /opt/microsoft /opt/google /usr/lib/jvm
+          docker system prune -af >/dev/null
+          df -h /
+      - name: Tags
+        id: tags
+        run: |
+          {
+            echo 'list<<EOF'
+            .github/scripts/image-tags.sh "$REGISTRY/${{ matrix.image }}" "${{ matrix.engine }}-gpu" false
+            echo EOF
+          } >>"$GITHUB_OUTPUT"
+          .github/scripts/image-tags.sh "$REGISTRY/${{ matrix.image }}" "${{ matrix.engine }}-gpu" false
+      - uses: docker/setup-buildx-action@v3
+      - name: Log in to ghcr.io (also reads the layer cache)
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build${{ env.PUSH == 'true' && ' and push' || '' }}
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
+          platforms: linux/amd64
+          build-args: |
+            ENGINE=${{ matrix.engine }}
+            VERSION=${{ github.ref_name }}-${{ github.sha }}
+          tags: ${{ steps.tags.outputs.list }}
+          push: ${{ env.PUSH == 'true' }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ github.ref_name }}
+            org.opencontainers.image.title=${{ matrix.image }}:${{ matrix.engine }}-gpu
+            org.opencontainers.image.description=whisper-hub speech-to-text, CUDA build
+          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ matrix.image }}:buildcache-${{ matrix.engine }}-gpu
+          cache-to: ${{ env.PUSH == 'true' && format('type=registry,mode=max,ref={0}/{1}:buildcache-{2}-gpu', env.REGISTRY, matrix.image, matrix.engine) || '' }}
+      - name: Disk left
+        if: always()
+        run: df -h /

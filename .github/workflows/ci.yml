@@ -1,0 +1,103 @@
+name: ci
+
+# Checks on every push and pull request: Go, the worker's pytest suite, and
+# end-to-end runs against real containers with fake engines. Real models are
+# not used here (see deploy/e2e and `make e2e-engines` for those).
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  go:
+    name: go (gofmt, vet, test -race)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Install ffmpeg (audio and gateway tests decode real files)
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends ffmpeg
+      - name: gofmt
+        run: |
+          out=$(gofmt -l .)
+          if [ -n "$out" ]; then echo "::error::gofmt needed on:"; echo "$out"; exit 1; fi
+      - name: go vet
+        run: go vet ./...
+      - name: go test -race
+        run: go test -race ./...
+
+  worker:
+    name: worker pytest (${{ matrix.engine }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        # faster_whisper also checks the copied writer code against the library.
+        engine: [fake, faster_whisper]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build test image
+        uses: docker/build-push-action@v6
+        with:
+          context: worker
+          target: test
+          build-args: ENGINE=${{ matrix.engine }}
+          tags: whisper-hub-worker-test:${{ matrix.engine }}
+          load: true
+          cache-from: type=gha,scope=worker-test-${{ matrix.engine }}
+          cache-to: type=gha,mode=max,scope=worker-test-${{ matrix.engine }}
+      - name: pytest
+        run: docker run --rm whisper-hub-worker-test:${{ matrix.engine }}
+
+  e2e:
+    name: e2e (real clients, fake engines)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Install ffmpeg (the scripts prepare test audio with it)
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends ffmpeg
+      - uses: docker/setup-buildx-action@v3
+      - name: Build gateway image
+        uses: docker/build-push-action@v6
+        with:
+          file: deploy/Dockerfile.gateway
+          tags: whisper-hub-gateway:latest
+          load: true
+          cache-from: type=gha,scope=gateway
+          cache-to: type=gha,mode=max,scope=gateway
+      - name: Build fake worker image
+        uses: docker/build-push-action@v6
+        with:
+          context: worker
+          build-args: ENGINE=fake
+          tags: whisper-hub-worker:fake
+          load: true
+          cache-from: type=gha,scope=worker-fake
+          cache-to: type=gha,mode=max,scope=worker-fake
+      - name: Build client image (openai SDK, wyoming)
+        uses: docker/build-push-action@v6
+        with:
+          context: deploy/e2e
+          tags: whisper-hub-e2e:latest
+          load: true
+          cache-from: type=gha,scope=e2e
+          cache-to: type=gha,mode=max,scope=e2e
+      - name: Owners' client checks (openai SDK, wyoming, Home Assistant replay, zeroconf)
+        run: deploy/e2e/clients.sh
+      - name: Protocols, streaming, cancellation, priority, auth (Python fake worker)
+        run: deploy/e2e/stack.sh fake
