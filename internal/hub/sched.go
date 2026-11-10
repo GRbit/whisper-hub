@@ -13,22 +13,18 @@ import (
 //
 // Every worker runs at most MaxInFlight jobs. Jobs that cannot start wait in
 // one hub-wide list bounded by QueueLength. Whenever a slot frees or a
-// worker appears, waiting jobs are considered in order of effective
-// priority (highest first), then arrival (FIFO), and each goes to the
-// least loaded healthy worker serving its model that has a free slot. A job
-// whose model has no free worker does not block jobs for other models.
+// worker appears, waiting jobs are considered in order of priority
+// (highest first), then arrival (FIFO), and each goes to the least loaded
+// healthy worker serving its model that has a free slot. A job whose model
+// has no free worker does not block jobs for other models.
 //
-// Effective priority is the requested priority plus one level per
-// PriorityAging interval waited, capped at interactive. So an interactive
-// job overtakes every queued batch or normal job that has waited less than
-// one or two intervals, and a batch job waits at most about two intervals
-// (plus the running jobs) before it competes FIFO with interactive ones.
-// With aging disabled the order is strict and batch can starve. Running
-// jobs are never preempted.
+// Waiting does not raise a job's priority: a constant stream of
+// higher-priority jobs keeps lower ones waiting. Running jobs are never
+// preempted.
 //
 // When the queue is full, a new job evicts the newest waiting job of
-// strictly lower effective priority (which fails with KindUnavailable);
-// if there is none, the new job itself is rejected with KindUnavailable.
+// strictly lower priority (which fails with KindUnavailable); if there is
+// none, the new job itself is rejected with KindUnavailable.
 
 type job struct {
 	model string
@@ -38,14 +34,6 @@ type job struct {
 	ready chan struct{} // closed once w or err is set
 	w     *worker
 	err   error
-}
-
-func (h *Hub) effPrio(j *job, now time.Time) core.Priority {
-	p := j.prio
-	if h.cfg.PriorityAging > 0 {
-		p += core.Priority(now.Sub(j.enq) / h.cfg.PriorityAging)
-	}
-	return min(p, core.PriorityInteractive)
 }
 
 // acquire waits for a slot on a worker serving model. The caller must
@@ -112,19 +100,17 @@ func (h *Hub) failLocked(j *job, err error) {
 
 // evictLocked makes room for j, which is already in pending.
 func (h *Hub) evictLocked(j *job) {
-	now := h.now()
 	var victim *job
 	for _, p := range h.pending {
 		if p == j {
 			continue
 		}
-		if victim == nil || h.effPrio(p, now) < h.effPrio(victim, now) ||
-			(h.effPrio(p, now) == h.effPrio(victim, now) && p.seq > victim.seq) {
+		if victim == nil || p.prio < victim.prio || (p.prio == victim.prio && p.seq > victim.seq) {
 			victim = p
 		}
 	}
 	full := core.Errorf(core.KindUnavailable, "server busy, queue is full")
-	if victim != nil && h.effPrio(victim, now) < h.effPrio(j, now) {
+	if victim != nil && victim.prio < j.prio {
 		h.log.Debug("queue full, evicting lower priority job", "evicted_seq", victim.seq, "for_seq", j.seq)
 		h.failLocked(victim, full)
 		return
@@ -140,8 +126,8 @@ func (h *Hub) dispatchLocked() {
 	}
 	now := h.now()
 	slices.SortStableFunc(h.pending, func(a, b *job) int {
-		if pa, pb := h.effPrio(a, now), h.effPrio(b, now); pa != pb {
-			return int(pb) - int(pa)
+		if a.prio != b.prio {
+			return int(b.prio) - int(a.prio)
 		}
 		return cmp.Compare(a.seq, b.seq)
 	})

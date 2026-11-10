@@ -277,8 +277,8 @@ Each worker gets at most `max_in_flight` jobs at once (default 1). The rest
 wait in one queue (`hub.queue_length`, default 100), ordered by priority and
 by arrival within a priority. Wyoming requests have interactive priority,
 legacy and OpenAI requests normal priority: a voice command waits only for
-the job already running. A waiting job gains one priority level per
-`hub.priority_aging` (default 5m), so normal jobs cannot starve. When the
+the job already running. Waiting does not raise a job's priority, so a
+constant stream of higher-priority jobs keeps lower ones waiting. When the
 queue is full, a new job pushes out the newest waiting job of lower
 priority, or is itself refused as busy (503 over HTTP).
 

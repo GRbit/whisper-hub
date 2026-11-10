@@ -94,7 +94,7 @@ func TestEnvValueTypes(t *testing.T) {
 		"WHISPER_HUB_HUB_WORKERS", `[{url: "http://w1:9100"}, {url: "http://w2:9100", max_in_flight: 3}]`,
 		"WHISPER_HUB_HUB_ALIASES", "whisper-1=small, big=large-v3",
 		"WHISPER_HUB_HUB_QUEUE_LENGTH", "7",
-		"WHISPER_HUB_HUB_PRIORITY_AGING", "90s",
+		"WHISPER_HUB_HUB_POLL_INTERVAL", "90s",
 		"WHISPER_HUB_AUTH_PROTECTED_PATHS", "/asr, /v1/",
 		"WHISPER_HUB_AUTH_TRUST_FORWARDED", "true",
 		"WHISPER_HUB_AUTH_WYOMING_ALLOW_CIDRS", "[10.0.0.0/8]",
@@ -104,7 +104,7 @@ func TestEnvValueTypes(t *testing.T) {
 	))
 	h := cfg.Hub
 	if len(h.Workers) != 2 || h.Workers[1].MaxInFlight != 3 || h.Aliases["whisper-1"] != "small" || h.Aliases["big"] != "large-v3" ||
-		h.QueueLength != 7 || h.PriorityAging != 90*time.Second {
+		h.QueueLength != 7 || h.PollInterval != 90*time.Second {
 		t.Fatalf("hub %+v", h)
 	}
 	a := cfg.Auth
@@ -302,13 +302,13 @@ func TestYAMLShowsResolvedDefaults(t *testing.T) {
 func TestYAMLKeepsSetValuesAndKeys(t *testing.T) {
 	flat := renderedLeaves(t, load(t, nil, envOf(
 		"WHISPER_HUB_HUB_QUEUE_LENGTH", "7",
-		"WHISPER_HUB_HUB_PRIORITY_AGING", "-1s",
+		"WHISPER_HUB_HUB_RETRY_MIN", "3s",
 		"WHISPER_HUB_AUTH_RATE_LIMIT_FAILURES", "-1",
 		"WHISPER_HUB_WYOMING_MAX_CONNECTIONS", "-1",
 		"WHISPER_HUB_WYOMING_PROGRAM_NAME", "kitchen",
 	)))
 	for k, want := range map[string]any{
-		"hub.queue_length": 7, "hub.priority_aging": "-1s", "auth.rate_limit.failures": -1,
+		"hub.queue_length": 7, "hub.retry_min": "3s", "auth.rate_limit.failures": -1,
 		"wyoming.max_connections": -1, "wyoming.program_name": "kitchen", "wyoming.zeroconf.name": "kitchen",
 	} {
 		if flat[k] != want {

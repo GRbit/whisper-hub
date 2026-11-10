@@ -36,11 +36,6 @@ type Config struct {
 	// QueueLength caps the jobs waiting for a worker, across all workers.
 	// Default 100.
 	QueueLength int `yaml:"queue_length"`
-	// PriorityAging raises the priority of a waiting job by one level per
-	// interval waited, so batch jobs cannot starve forever under constant
-	// interactive load. Default 5m; negative disables aging (strict
-	// priority, batch may starve).
-	PriorityAging time.Duration `yaml:"priority_aging"`
 	// PollInterval is how often a healthy worker is re-probed. Default 15s.
 	PollInterval time.Duration `yaml:"poll_interval"`
 	// RetryMin and RetryMax bound the exponential backoff for probing an
@@ -88,9 +83,6 @@ func (c Config) Resolved() Config {
 	c.Aliases = aliases
 	if c.QueueLength <= 0 {
 		c.QueueLength = 100
-	}
-	if c.PriorityAging == 0 {
-		c.PriorityAging = 5 * time.Minute
 	}
 	if c.PollInterval <= 0 {
 		c.PollInterval = 15 * time.Second

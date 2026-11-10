@@ -416,7 +416,7 @@ Each worker runs at most `max_in_flight` jobs (default 1). Jobs that cannot
 start wait in one queue for the whole hub, bounded by `hub.queue_length`.
 
 - Whenever a slot frees up or a worker appears, waiting jobs are considered
-  by effective priority, highest first, then by arrival. Each goes to the
+  by priority, highest first, then by arrival. Each goes to the
   least loaded healthy worker that serves its model and has a free slot;
   equally loaded workers take turns.
 - A job whose model has no free worker does not block jobs for other models.
@@ -424,13 +424,11 @@ start wait in one queue for the whole hub, bounded by `hub.queue_length`.
   OpenAI requests are normal; Wyoming requests are interactive, so a
   two-second voice command waits only for the job already running, not
   behind an hour-long file. No frontend submits batch jobs.
-- The effective priority is the requested one plus one level for every
-  `hub.priority_aging` interval the job has waited, capped at interactive.
-  This bounds starvation: after one interval a normal job competes with
-  interactive ones in arrival order. A negative interval disables aging.
+- Waiting does not raise a job's priority, so a constant stream of
+  higher-priority jobs keeps lower ones waiting.
 - Running jobs are never preempted.
 - When the queue is full, a new job pushes out the newest waiting job of
-  strictly lower effective priority, which fails as `unavailable`. If there
+  strictly lower priority, which fails as `unavailable`. If there
   is none, the new job itself fails as `unavailable`.
 - A waiting job whose model loses its last healthy worker fails at once
   instead of waiting for an unknown time.

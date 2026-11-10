@@ -54,12 +54,10 @@ hub:
   # Unknown model names: "default" falls back to the default model (many
   # OpenAI clients hardcode names), "error" answers model_not_found.
   unknown_model: default
-  # Jobs waiting for a worker, across all workers; more get "busy".
+  # Jobs waiting for a worker, across all workers; more get "busy". They
+  # start by priority, then arrival: a constant stream of higher-priority
+  # (Wyoming) jobs keeps lower ones waiting.
   queue_length: 100
-  # A waiting job gains one priority level per interval, so batch jobs
-  # cannot starve behind constant interactive (Wyoming) traffic. Negative
-  # disables aging.
-  priority_aging: 5m
   poll_interval: 15s # re-probe of a healthy worker
   retry_min: 1s # backoff bounds while a worker is down or loading
   retry_max: 30s

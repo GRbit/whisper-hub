@@ -485,41 +485,33 @@ func TestPriorityOrderFIFOWithinPriority(t *testing.T) {
 	}
 }
 
-// Aging uses wall time here; the batch job waits three aging intervals, so
-// a slow machine only makes it older and cannot flip the expected order.
-func TestAgingBoundsStarvation(t *testing.T) {
-	for _, tc := range []struct {
-		aging time.Duration
-		first string
-	}{
-		{20 * time.Millisecond, "batch"}, // aged to interactive and older
-		{-1, "interactive"},              // strict priority: batch can starve
-	} {
-		w := workertest.New(t, workertest.DefaultInfo())
-		gate := make(chan struct{})
-		w.SetTranscribe(gated(gate))
-		e := start(t, hub.Config{PriorityAging: tc.aging}, nil, 1, w)
-		out := make(chan outcome, 3)
-		async(e.hub, context.Background(), req("holder"), out)
-		nextStarted(t, w)
-		b := req("batch")
-		b.Priority = core.PriorityBatch
-		async(e.hub, context.Background(), b, out)
-		waitQueued(t, e.hub, 1)
-		time.Sleep(60 * time.Millisecond)
-		i := req("interactive")
-		i.Priority = core.PriorityInteractive
-		async(e.hub, context.Background(), i, out)
-		waitQueued(t, e.hub, 2)
-		gate <- struct{}{}
-		if got := prompt(nextStarted(t, w)); got != tc.first {
-			t.Fatalf("aging %v: first %s, want %s", tc.aging, got, tc.first)
-		}
-		gate <- struct{}{}
-		gate <- struct{}{}
-		for range 3 {
-			<-out
-		}
+// Waiting does not raise priority: a batch job that has waited longer
+// still starts after an interactive one that arrived later.
+func TestWaitingDoesNotRaisePriority(t *testing.T) {
+	w := workertest.New(t, workertest.DefaultInfo())
+	gate := make(chan struct{})
+	w.SetTranscribe(gated(gate))
+	e := start(t, hub.Config{}, nil, 1, w)
+	out := make(chan outcome, 3)
+	async(e.hub, context.Background(), req("holder"), out)
+	nextStarted(t, w)
+	b := req("batch")
+	b.Priority = core.PriorityBatch
+	async(e.hub, context.Background(), b, out)
+	waitQueued(t, e.hub, 1)
+	time.Sleep(60 * time.Millisecond)
+	i := req("interactive")
+	i.Priority = core.PriorityInteractive
+	async(e.hub, context.Background(), i, out)
+	waitQueued(t, e.hub, 2)
+	gate <- struct{}{}
+	if got := prompt(nextStarted(t, w)); got != "interactive" {
+		t.Fatalf("first %s, want interactive", got)
+	}
+	gate <- struct{}{}
+	gate <- struct{}{}
+	for range 3 {
+		<-out
 	}
 }
 
