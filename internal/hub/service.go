@@ -48,7 +48,8 @@ func (h *Hub) transcribe(ctx context.Context, req *core.Request, onSegment func(
 		return nil, err
 	}
 	ev.Task = opts.Task
-	j := &job{ctx: ctx, model: view.id, prio: h.priorityOf(ctx, req.Protocol), pausable: true}
+	j := &job{ctx: ctx, model: view.id, prio: h.priorityOf(ctx, req.Protocol), pausable: true,
+		maxRestarts: *h.cfg.MaxRestarts}
 	seg := onSegment
 	if onSegment != nil {
 		seg = func(s core.Segment) error {
@@ -200,7 +201,7 @@ func (h *Hub) detect(ctx context.Context, req *core.DetectRequest, audio core.PC
 		return nil, err
 	}
 	ev.Model, ev.Engine = view.id, view.engine
-	j := &job{ctx: ctx, model: view.id, prio: h.priorityOf(ctx, req.Protocol)}
+	j := &job{ctx: ctx, model: view.id, prio: h.priorityOf(ctx, req.Protocol), maxRestarts: *h.cfg.MaxRestarts}
 	var det *core.Detection
 	err = h.schedule(j, func(actx context.Context, w *worker, _ string, _ func(bool)) error {
 		var err error

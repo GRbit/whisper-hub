@@ -33,8 +33,9 @@ import (
 // canceled and queued again to restart from the beginning. Two kinds of
 // job are never canceled for a restart, only paused: one that has handed
 // segments to its caller (the caller would see them twice), and one that
-// was restarted once already (so repeated preemption cannot discard its
-// work forever). If such a job does not pause, the higher job waits.
+// was restarted MaxRestarts times already (so repeated preemption cannot
+// discard its work forever). If such a job does not pause, the higher job
+// waits.
 //
 // When the queue is full, a new job evicts the newest waiting new job of
 // strictly lower priority (which fails with KindUnavailable); if there is
@@ -75,8 +76,10 @@ type job struct {
 	cancel    context.CancelCauseFunc
 	delivered bool // a segment reached the caller
 	restarts  int
-	doomed    bool // canceled to be restarted
-	noPause   bool // the worker refused to pause this attempt
+	// maxRestarts is Config.MaxRestarts when the job was created.
+	maxRestarts int
+	doomed      bool // canceled to be restarted
+	noPause     bool // the worker refused to pause this attempt
 
 	// Preemption: pauseFor is set on a running job being paused for a
 	// waiting one, preempting on that waiting one.
@@ -88,7 +91,7 @@ type job struct {
 }
 
 // protected jobs are never canceled for a restart.
-func (j *job) protected() bool { return j.delivered || j.restarts > 0 }
+func (j *job) protected() bool { return j.delivered || j.restarts >= j.maxRestarts }
 
 func (j *job) canPause() bool { return j.pausable && !j.noPause }
 

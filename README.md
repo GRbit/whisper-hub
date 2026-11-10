@@ -309,6 +309,7 @@ hub:
     wyoming: 100
     admin: 70          # optional; unset means the protocol default
   preempt_timeout: 5s
+  max_restarts: 3
 ```
 
 A running job is interrupted when a job of strictly higher priority cannot
@@ -330,9 +331,11 @@ What this means for clients:
   restarted, because the client would see that text twice. It may be
   paused, which shows as a gap between deltas; if it does not pause, the
   higher job waits for it to finish.
-- A job is restarted at most once. After a restart it is treated like a
-  streaming job that has sent text: it may be paused, but not canceled
-  again, so a series of higher jobs cannot keep throwing its work away.
+- A job is restarted at most `hub.max_restarts` times (default 3). After
+  that it is treated like a streaming job that has sent text: it may be
+  paused, but not canceled again, so a series of higher jobs cannot keep
+  throwing its work away. `hub.max_restarts: 0` means a running job is
+  never canceled, only asked to pause.
 - The usage record is one per request. `queued_ms` counts all the time the
   job did not run: waiting to start, paused, and waiting to restart.
   `elapsed_ms` is the whole request, a canceled run included.

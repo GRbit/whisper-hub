@@ -73,9 +73,13 @@ hub:
   # How long a running lower-priority job gets to pause for a higher one.
   # A paused job continues later where it stopped. One that does not pause
   # in time is canceled and restarts from the beginning later, unless it
-  # already streamed output to its client or was restarted once: then the
-  # higher job waits for it. Negative: never interrupt a running job.
+  # already streamed output to its client or was restarted max_restarts
+  # times: then the higher job waits for it. Negative: never interrupt a
+  # running job.
   preempt_timeout: 5s
+  # How often one job may be canceled to restart later. 0: never cancel for
+  # a restart, only ask to pause.
+  max_restarts: 3
   poll_interval: 15s # re-probe of a healthy worker
   retry_min: 1s # backoff bounds while a worker is down or loading
   retry_max: 30s

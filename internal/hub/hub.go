@@ -44,6 +44,11 @@ type Config struct {
 	// restart from the beginning. Negative: running jobs are never
 	// interrupted. Default 5s.
 	PreemptTimeout time.Duration `yaml:"preempt_timeout"`
+	// MaxRestarts is how often one job may be canceled for a restart. After
+	// that many it is only asked to pause, and a higher job that finds it
+	// unpaused waits for it, so repeated preemption cannot discard its work
+	// forever. 0: never cancel for a restart, only pause. Default 3.
+	MaxRestarts *int `yaml:"max_restarts"`
 	// PollInterval is how often a healthy worker is re-probed. Default 15s.
 	PollInterval time.Duration `yaml:"poll_interval"`
 	// RetryMin and RetryMax bound the exponential backoff for probing an
@@ -78,6 +83,9 @@ type Priorities struct {
 	// the protocol default applies.
 	Admin *int `yaml:"admin"`
 }
+
+// DefaultMaxRestarts is the default of Config.MaxRestarts.
+const DefaultMaxRestarts = 3
 
 // Default priorities.
 const (
@@ -121,6 +129,10 @@ func (c Config) Resolved() Config {
 	if c.Priorities.Admin != nil {
 		a := *c.Priorities.Admin
 		c.Priorities.Admin = &a
+	}
+	c.MaxRestarts = orDefault(c.MaxRestarts, DefaultMaxRestarts)
+	if *c.MaxRestarts < 0 {
+		*c.MaxRestarts = 0
 	}
 	if c.PreemptTimeout == 0 {
 		c.PreemptTimeout = 5 * time.Second
@@ -253,7 +265,8 @@ func New(cfg Config, authz core.Authorizer, usage core.UsageRecorder, log *slog.
 	h.log.Info("hub started", "workers", len(h.workers), "default_model", cfg.DefaultModel,
 		"unknown_model", h.cfg.UnknownModel, "queue_length", h.cfg.QueueLength,
 		"priority_legacy", *h.cfg.Priorities.Legacy, "priority_openai", *h.cfg.Priorities.OpenAI,
-		"priority_wyoming", *h.cfg.Priorities.Wyoming, "preempt_timeout", h.cfg.PreemptTimeout)
+		"priority_wyoming", *h.cfg.Priorities.Wyoming, "preempt_timeout", h.cfg.PreemptTimeout,
+		"max_restarts", *h.cfg.MaxRestarts)
 	return h, nil
 }
 

@@ -481,12 +481,13 @@ on any worker. A negative `hub.preempt_timeout` disables interruption.
   Legacy and non-streaming requests never deliver partial output, so a
   restart is invisible to them except in timing; their responses are those
   of an uninterrupted run.
-- **Bounded restarts.** A job is canceled for a restart at most once.
+- **Bounded restarts.** A job is canceled for a restart at most
+  `hub.max_restarts` times (default 3; 0 means never, only pause).
   Afterwards it is protected like a job that delivered output. Without the
   bound a low job on an engine that pauses rarely (whisperx) would be
   restarted by every voice command and might never finish; with it, the
-  work thrown away is at most one partial run per job. The price is that
-  a later higher job may have to wait for that second run.
+  work thrown away is at most that many partial runs per job. The price is
+  that a later higher job may have to wait for its last run.
 - **Language detection** has no pause point. It is not asked to pause; the
   timeout applies directly (it is short anyway) and it restarts like any
   other job.
@@ -736,9 +737,9 @@ How this shows in the code:
   pauses within a segment's time, openai_whisper within a 30-second window,
   whisperx only between stages, so on a long file it is usually canceled and
   restarted, and a canceled job still holds the engine until its next pause
-  point. A restarted job is not interrupted again, and a streaming job that
-  sent text is never restarted, so a voice command can still wait for a
-  whole file there. A separate worker for interactive use avoids all of it.
+  point. A job restarted `hub.max_restarts` times is not canceled again,
+  and a streaming job that sent text is never restarted, so a voice command
+  can still wait for a whole file there. A separate worker for interactive use avoids all of it.
 - **A paused job keeps its memory.** Its audio and engine state stay in the
   worker, and it can only continue on that worker. A worker that would have
   to unload the paused job's model to run the other one refuses the pause.

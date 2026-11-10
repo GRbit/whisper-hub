@@ -23,6 +23,7 @@ package hub_test
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"log/slog"
 	"slices"
 	"strings"
@@ -310,30 +311,56 @@ func TestDeliveredJobCanPause(t *testing.T) {
 	}
 }
 
-// Restarting is bounded: a job is canceled for a restart at most once.
-// Afterwards it is treated like a job that delivered output: it may pause,
-// but a higher job waits for it rather than cancel it again.
-func TestRestartHappensAtMostOnce(t *testing.T) {
-	w := workertest.New(t, workertest.DefaultInfo())
-	low := make(chan struct{})
-	w.SetTranscribe(byPrompt(map[string]workertest.TranscribeFunc{"low": gated(low)}))
-	e, lb := startLogged(t, hub.Config{PreemptTimeout: time.Nanosecond}, 1, w)
-	out := make(chan outcome, 3)
-	async(e.hub, as(10), req("low"), out)
-	nextStarted(t, w)
-	async(e.hub, as(90), req("high1"), out)
-	nextStarted(t, w) // high1, after low was canceled
-	<-out
-	nextStarted(t, w) // low again
-	async(e.hub, as(90), req("high2"), out)
-	lb.waitLog(t, "asking job to pause", 2)
-	close(low)
-	if o := <-out; o.name != "low" || o.err != nil {
-		t.Fatalf("got %s %v, want low first", o.name, o.err)
-	}
-	<-out
-	if got := started(w); !slices.Equal(got, []string{"low", "high1", "low", "high2"}) {
-		t.Fatalf("worker jobs %v", got)
+// Restarting is bounded by MaxRestarts (default 3): after that many cancels
+// a job is treated like one that delivered output: it may pause, but a
+// higher job waits for it rather than cancel it again. MaxRestarts 0 means
+// a job is never canceled for a restart, only asked to pause.
+func TestRestartLimit(t *testing.T) {
+	zero, one := 0, 1
+	for _, tc := range []struct {
+		name     string
+		limit    *int
+		restarts int
+	}{
+		{"default 3", nil, 3},
+		{"one", &one, 1},
+		{"zero: pause only", &zero, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w := workertest.New(t, workertest.DefaultInfo())
+			low := make(chan struct{})
+			w.SetTranscribe(byPrompt(map[string]workertest.TranscribeFunc{"low": gated(low)}))
+			e, lb := startLogged(t, hub.Config{PreemptTimeout: time.Nanosecond, MaxRestarts: tc.limit}, 1, w)
+			out := make(chan outcome, tc.restarts+2)
+			async(e.hub, as(10), req("low"), out)
+			nextStarted(t, w)
+			want := []string{"low"}
+			for i := range tc.restarts {
+				name := fmt.Sprintf("high%d", i)
+				async(e.hub, as(90), req(name), out)
+				if got := prompt(nextStarted(t, w)); got != name {
+					t.Fatalf("started %s, want %s (low canceled)", got, name)
+				}
+				if o := <-out; o.name != name || o.err != nil {
+					t.Fatalf("got %s %v", o.name, o.err)
+				}
+				if got := prompt(nextStarted(t, w)); got != "low" {
+					t.Fatalf("started %s, want low restarted", got)
+				}
+				want = append(want, name, "low")
+			}
+			// One more higher job: the limit is reached, so it waits.
+			async(e.hub, as(90), req("last"), out)
+			lb.waitLog(t, "asking job to pause", tc.restarts+1)
+			close(low)
+			if o := <-out; o.name != "low" || o.err != nil {
+				t.Fatalf("got %s %v, want low first", o.name, o.err)
+			}
+			<-out
+			if got := started(w); !slices.Equal(got, append(want, "last")) {
+				t.Fatalf("worker jobs %v, want %v", got, append(want, "last"))
+			}
+		})
 	}
 }
 
@@ -680,5 +707,8 @@ func TestDefaultPriorities(t *testing.T) {
 	}
 	if d := (hub.Config{}).Resolved().PreemptTimeout; d != 5*time.Second {
 		t.Fatalf("preempt_timeout default %v", d)
+	}
+	if m := (hub.Config{}).Resolved().MaxRestarts; m == nil || *m != 3 {
+		t.Fatalf("max_restarts default %v", m)
 	}
 }

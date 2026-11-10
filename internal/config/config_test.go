@@ -307,12 +307,14 @@ func TestYAMLKeepsSetValuesAndKeys(t *testing.T) {
 		"WHISPER_HUB_HUB_PRIORITIES_LEGACY", "0",
 		"WHISPER_HUB_HUB_PRIORITIES_ADMIN", "-7",
 		"WHISPER_HUB_HUB_PREEMPT_TIMEOUT", "-1s",
+		"WHISPER_HUB_HUB_MAX_RESTARTS", "0",
 	)))
 	for k, want := range map[string]any{
 		"hub.queue_length": 7, "hub.retry_min": "3s", "auth.rate_limit.failures": -1,
 		"wyoming.max_connections": -1, "wyoming.program_name": "kitchen", "wyoming.zeroconf.name": "kitchen",
 		// A priority of 0 is a value, not "unset".
 		"hub.priorities.legacy": 0, "hub.priorities.admin": -7, "hub.priorities.wyoming": 100, "hub.preempt_timeout": "-1s",
+		"hub.max_restarts": 0,
 	} {
 		if flat[k] != want {
 			t.Errorf("%s = %v, want %v", k, flat[k], want)
