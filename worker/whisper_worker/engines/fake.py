@@ -18,6 +18,8 @@ Behavior (documented in worker/README.md, keep both in sync):
     fail=bad_request|model_not_found|unavailable|internal
                       fail before any output (HTTP error)
     fail_after=<n>    emit n segments, then an error event (code internal)
+    pause=ignore      never pause (cancellation still works), like an engine
+                      that does not return control in time
 - /v1/detect-language returns WHISPER_HUB_ENGINE_FAKE_LANGUAGE with confidence 0.99.
 """
 
@@ -26,7 +28,7 @@ from typing import Any, Tuple
 
 from .. import legacy_writers
 from ..audio import duration
-from ..errors import BadRequest, Internal, ModelNotFound, Unavailable
+from ..errors import BadRequest, Internal, JobCancelled, ModelNotFound, Unavailable
 from .base import Done, Engine, JobContext, Options, to_neutral
 
 logger = logging.getLogger("whisper_worker")
@@ -52,6 +54,7 @@ class Directives:
         self.segments = segments
         self.fail = None
         self.fail_after = None
+        self.ignore_pause = False
 
 
 def parse_directives(prompt, delay: float, segments: int) -> Directives:
@@ -71,6 +74,8 @@ def parse_directives(prompt, delay: float, segments: int) -> Directives:
                 d.fail = value
             elif key == "fail_after":
                 d.fail_after = max(0, int(value))
+            elif key == "pause" and value == "ignore":
+                d.ignore_pause = True
             else:
                 raise ValueError(key)
         except ValueError:
@@ -116,6 +121,7 @@ def fake_segments(n: int, word_timestamps: bool):
 class FakeEngine(Engine):
     name = "fake"
     capabilities = {"word_timestamps": True, "vad_filter": True, "diarize": False, "translate": True}
+    pausable = True
 
     def version(self) -> str:
         return "fake"
@@ -133,6 +139,15 @@ class FakeEngine(Engine):
 
     def transcribe(self, handle: Any, audio: Any, opts: Options, ctx: JobContext) -> Done:
         d = parse_directives(opts.prompt, self.cfg.fake_delay, self.cfg.fake_segments)
+
+        def checkpoint():
+            if d.ignore_pause:
+                if ctx.cancelled():
+                    raise JobCancelled()
+            else:
+                ctx.check_cancelled()
+
+        checkpoint()
         if opts.language:
             language, prob = opts.language, 1.0
         else:
@@ -145,8 +160,8 @@ class FakeEngine(Engine):
                 raise Internal("fake failure requested after segments")
             # Event.wait returns early on cancellation, so a slow fake stream stops at once.
             if d.delay and ctx.cancel_event.wait(d.delay):
-                ctx.check_cancelled()
-            ctx.check_cancelled()
+                raise JobCancelled()
+            checkpoint()
             segments.append(seg)
             text += seg.text
             ctx.segment(to_neutral(seg))

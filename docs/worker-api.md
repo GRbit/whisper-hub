@@ -36,6 +36,7 @@ A change to the API has to be made in all three.
 | `GET /v1/info` | engine, models, languages, capabilities |
 | `POST /v1/transcribe` | run a transcription or translation, streamed |
 | `POST /v1/detect-language` | identify the spoken language |
+| `POST /v1/pause` | pause a running transcription for as long as the request stays open |
 
 Any other path answers `404` with code `not_found`; a known path with the
 wrong method answers `405` with code `method_not_allowed`. Both use the
@@ -111,7 +112,8 @@ order. The Python worker accepts either order, and treats a missing or empty
   "diarize": false,
   "min_speakers": null,
   "max_speakers": null,
-  "legacy_output": null
+  "legacy_output": null,
+  "job_id": "3f2a91c0-7-1"
 }
 ```
 
@@ -127,6 +129,7 @@ order. The Python worker accepts either order, and treats a missing or empty
 | `diarize` | boolean | false | label speakers (whisperx with `HF_TOKEN`) |
 | `min_speakers`, `max_speakers` | integer or null | null | non-negative; diarization hints |
 | `legacy_output` | string or null | null | `txt`, `vtt`, `srt`, `tsv` or `json`: also render the transcript in that whisper-asr-webservice format, see `rendered` below |
+| `job_id` | string or null | null | the name `POST /v1/pause` uses for this job; chosen by the gateway, unique per attempt. The gateway omits it when it is empty |
 
 Rules the worker applies:
 
@@ -153,7 +156,18 @@ HTTP error (see [Errors](#errors)).
 ```
 
 The stream is one `info` event, then zero or more `segment` events, then
-exactly one `done` or `error` event.
+exactly one `done` or `error` event. `paused` and `resumed` events may come
+anywhere before the last line, also before `info`:
+
+```
+{"type":"paused"}
+{"type":"resumed"}
+```
+
+`paused` means the job stopped at a pause point because a pause request
+names it, and gave its model to the next job; `resumed` means it has the
+model again and continues. Between the two the stream is silent. See
+[`POST /v1/pause`](#post-v1pause).
 
 `info`:
 
@@ -199,7 +213,9 @@ A failure after the stream has started replaces `done` with a final line:
 
 What the gateway does with the stream: it ignores blank lines and unknown
 event types, treats a stream that ends without `done` or `error` as an
-internal failure, and rejects a line longer than 64 MiB.
+internal failure, and rejects a line longer than 64 MiB. Any line ends the
+first-byte wait (`hub.first_byte_timeout`), so a job paused before its
+`info` line is not taken for a stuck worker.
 
 ## `POST /v1/detect-language`
 
@@ -215,6 +231,70 @@ gateway sends no more than that, and the engines pad or trim to 30 seconds.
 The response is a single JSON document, not a stream, so every failure is an
 HTTP error.
 
+## `POST /v1/pause`
+
+```json
+{"job_id": "3f2a91c0-7-1", "model": "tiny"}
+```
+
+| Field | Meaning |
+|---|---|
+| `job_id` | the `job_id` of a transcription; it need not have arrived yet |
+| `model` | the model the gateway will run while this job is paused, or null |
+
+The pause lasts exactly as long as this request stays open:
+
+1. The worker answers `200` with `Content-Type: application/x-ndjson` and
+   one line `{"status":"pausing"}`, and keeps the response open. That only
+   means the pause is registered.
+2. At its next pause point the job stops, gives its model to the next job
+   waiting for it, and its transcribe stream sends `paused`. A job that
+   has not reached the worker yet pauses at its first pause point, before
+   any output.
+3. When the gateway closes the request, the job takes its model back, ahead
+   of jobs that wait for it, its stream sends `resumed`, and it continues.
+   Closing the request before the job paused withdraws the pause.
+4. When the job ends (done, failed, or canceled while paused), the worker
+   ends this response.
+
+A paused job keeps its thread, its audio and its engine state; a model with
+a paused job is never unloaded. Canceling a paused job (closing its
+transcribe connection) ends it at once.
+
+Errors, before anything else is sent:
+
+| Status | `code` | When |
+|---|---|---|
+| 400 | `bad_request` | the body is not a JSON object with a non-empty `job_id` string, or `model` is not a string or null |
+| 409 | `not_pausable` | the engine cannot pause at all, or `model` is not loaded and could only be loaded by unloading the paused job's model (`WHISPER_HUB_ENGINE_MAX_LOADED_MODELS`) |
+
+Only transcriptions pause; `POST /v1/detect-language` has no pause point.
+
+### Pausing
+
+A pause point is `ctx.check_cancelled()` in the engine adapter, the same
+place where cancellation is noticed. Each engine checks once before it
+starts, so a job can always pause before doing any work, and then:
+
+| Engine | Pauses | Why that is safe |
+|---|---|---|
+| `faster_whisper` | between segments | the segment generator keeps its decoding state to itself; another call on the same `WhisperModel` runs in between |
+| `openai_whisper` | between 30-second windows, and once after decoding | the decoder's key-value cache hooks are installed and removed within each window |
+| `whisperx` | between its transcribe, align and diarize stages | the pipeline's tokenizer and options belong to the call in progress during transcribe and are reset when it returns; there is no pause point inside it, so on a long file a pause usually takes effect only after most of the work |
+| `fake` | before each segment, unless the prompt has the directive `pause=ignore` | |
+
+Checked per engine with model `tiny` on the CPU images, using
+`worker/scripts/pause_check.py`: a 2-minute recording runs uninterrupted, then again
+paused once at its first pause point and once one second in, while a short
+recording runs to the end in the gap. Both streams, `rendered` included
+(`legacy_output` json and srt, and with `word_timestamps` for
+faster_whisper and openai_whisper), were identical to their uninterrupted
+runs for all three engines; whisperx paused 2.5 s after the request, at the
+end of its transcribe stage. Output with temperature fallback depends on
+the random state of the process in openai_whisper with or without a pause;
+the check also runs the long recording twice without pausing and reports
+when the engine is not deterministic on it.
+
 ## Errors
 
 A failure before any output is an HTTP error with this body:
@@ -228,6 +308,7 @@ A failure before any output is an HTTP error with this body:
 | 400 | `bad_request` | malformed multipart body, invalid options, invalid audio payload |
 | 404 | `model_not_found` | the worker does not serve the requested model |
 | 503 | `unavailable` | the job cannot run now, for example the model failed to load |
+| 409 | `not_pausable` | `POST /v1/pause` only, see there |
 | 500 | `internal` | the engine failed |
 | 404 | `not_found` | unknown path |
 | 405 | `method_not_allowed` | known path, wrong method |
@@ -248,10 +329,11 @@ the gateway goes by the status: 400 and 422 mean `bad_request`, 404
 ## Concurrency and model loading
 
 - Each model runs one job at a time. Further jobs for the same model wait in
-  the worker, in arrival order. Jobs for different models run concurrently.
+  the worker, in arrival order; a paused job does not count, and a resumed
+  one goes first. Jobs for different models run concurrently.
 - The gateway normally never makes a job wait there: it sends at most
-  `max_in_flight` jobs per worker at once (default 1) and keeps the rest in
-  its own priority queue.
+  `max_in_flight` running jobs per worker at once (default 1), not counting
+  paused ones, and keeps the rest in its own priority queue.
 - A model is loaded on the first job that needs it, unless `WHISPER_HUB_ENGINE_PRELOAD`
   loaded the default model at startup. At most `WHISPER_HUB_ENGINE_MAX_LOADED_MODELS`
   models are in memory; to load another one the worker unloads the idle model
@@ -274,7 +356,8 @@ the engine gives control back:
 | `whisperx` | between its transcribe, align and diarize stages |
 | `fake` | at once |
 
-A job that was still waiting for its model is dropped without running.
+A job that was still waiting for its model is dropped without running. A
+paused job stops at once.
 
 ## What the gateway expects in time
 

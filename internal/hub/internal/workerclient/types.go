@@ -47,6 +47,8 @@ type Options struct {
 	MinSpeakers    *int      `json:"min_speakers"`
 	MaxSpeakers    *int      `json:"max_speakers"`
 	LegacyOutput   *string   `json:"legacy_output"`
+	// JobID names the job in POST /v1/pause; empty when it is never paused.
+	JobID string `json:"job_id,omitempty"`
 }
 
 // OptionsFromRequest builds worker options for model from a core request.

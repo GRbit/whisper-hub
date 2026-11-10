@@ -144,6 +144,7 @@ Segment `i` (counting from 0) has `id` i+1, `seek` i*200, `start` 2i, `end`
   | `segments=<n>` | overrides `WHISPER_HUB_ENGINE_FAKE_SEGMENTS` for this job |
   | `fail=<code>` | fails with an HTTP error before any output; code is `bad_request`, `model_not_found`, `unavailable` or `internal` |
   | `fail_after=<n>` | sends n segments, then an `error` line with code `internal` |
+  | `pause=ignore` | never pauses (cancellation still works), like an engine that does not reach a pause point in time |
 
   Example: `fake:delay=0.5,segments=20`. Through the gateway this is the
   legacy parameter `initial_prompt` or the OpenAI field `prompt`.

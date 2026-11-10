@@ -173,8 +173,10 @@ func (c *Client) DetectLanguage(ctx context.Context, model string, audio core.PC
 // onSegment, when not nil, runs for every segment as it arrives; an error
 // from it aborts the job (the HTTP request is canceled, which tells the
 // worker to stop) and is returned as KindCanceled unless it already is a
-// *core.Error.
-func (c *Client) Transcribe(ctx context.Context, opts Options, audio core.PCM, onSegment func(core.Segment) error) (*core.Result, error) {
+// *core.Error. onPause, when not nil, runs with true when the worker
+// reports the job paused (see Pause) and with false when it runs again.
+func (c *Client) Transcribe(ctx context.Context, opts Options, audio core.PCM, onSegment func(core.Segment) error,
+	onPause func(paused bool)) (*core.Result, error) {
 	ctx, cancel := context.WithCancelCause(ctx)
 	defer cancel(nil)
 	errFirstByte := errors.New("first byte timeout")
@@ -260,10 +262,55 @@ func (c *Client) Transcribe(ctx context.Context, opts Options, audio core.PCM, o
 		case "error":
 			c.log.Debug("transcribe stream error", "code", ev.Code, "message", ev.Message)
 			return nil, codeError(ev.Code, ev.Message)
+		case "paused", "resumed":
+			c.log.Debug("transcribe "+ev.Type, "job", opts.JobID, "elapsed", time.Since(started))
+			if onPause != nil {
+				onPause(ev.Type == "paused")
+			}
 		default:
 			c.log.Debug("ignoring unknown stream event", "type", ev.Type)
 		}
 	}
+}
+
+// ErrNotPausable is the cause of a Pause the worker refused at once: its
+// engine cannot pause, or the model to run next would not fit beside the
+// paused one.
+var ErrNotPausable = errors.New("worker cannot pause this job")
+
+// Pause asks the worker to pause the job named id (Options.JobID) at its
+// next pause point, so that a job for model can run meanwhile, and keeps
+// it paused until ctx is done. The job may not have reached the worker
+// yet. Whether and when the pause takes effect is reported in that job's
+// stream, not here. Pause returns nil when ctx ends the pause or the
+// worker ends it because the job ended, and an error when the worker
+// refused (wrapping ErrNotPausable) or could not be reached.
+func (c *Client) Pause(ctx context.Context, id, model string) error {
+	body, err := json.Marshal(map[string]string{"job_id": id, "model": model})
+	if err != nil {
+		return core.WrapError(core.KindInternal, err, "cannot encode pause request")
+	}
+	resp, err := c.do(ctx, http.MethodPost, "/v1/pause", func() io.Reader { return bytes.NewReader(body) },
+		"application/json", int64(len(body)))
+	if err != nil {
+		if ctx.Err() != nil {
+			return nil
+		}
+		return err
+	}
+	// Not drain: the body stays open for as long as the pause lasts.
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		err := httpError(resp)
+		if resp.StatusCode == http.StatusConflict {
+			return fmt.Errorf("%w: %w", ErrNotPausable, err)
+		}
+		return err
+	}
+	c.log.Debug("pause held", "job", id, "for_model", model)
+	_, _ = io.Copy(io.Discard, resp.Body)
+	c.log.Debug("pause released", "job", id, "by_gateway", ctx.Err() != nil)
+	return nil
 }
 
 func (c *Client) postJob(ctx context.Context, path string, opts any, audio core.PCM) (*http.Response, error) {

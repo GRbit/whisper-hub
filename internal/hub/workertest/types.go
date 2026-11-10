@@ -49,4 +49,11 @@ type Options struct {
 	MinSpeakers    *int      `json:"min_speakers"`
 	MaxSpeakers    *int      `json:"max_speakers"`
 	LegacyOutput   *string   `json:"legacy_output"`
+	JobID          string    `json:"job_id"`
+}
+
+// PauseRequest is one POST /v1/pause the fake received.
+type PauseRequest struct {
+	JobID string `json:"job_id"`
+	Model string `json:"model"`
 }

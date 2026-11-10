@@ -104,11 +104,15 @@ class _Stream:
             return
         self.send_info(language)
         self.send_segments(segments)
+        # Between windows: the decoder hooks of the last window are removed,
+        # so another transcription may use the model while this one pauses.
+        self.ctx.check_cancelled()
 
 
 class OpenAIWhisperEngine(Engine):
     name = "openai_whisper"
     capabilities = {"word_timestamps": True, "vad_filter": False, "diarize": False, "translate": True}
+    pausable = True
 
     def version(self) -> str:
         import torch
@@ -147,6 +151,7 @@ class OpenAIWhisperEngine(Engine):
             options_dict["word_timestamps"] = opts.word_timestamps
         if opts.temperature is not None:
             options_dict["temperature"] = opts.temperature
+        ctx.check_cancelled()
         logger.debug("openai_whisper transcribe: %s", {k: v for k, v in options_dict.items() if k != "initial_prompt"})
 
         stream = _Stream(ctx, audio.shape[0] / 16000)

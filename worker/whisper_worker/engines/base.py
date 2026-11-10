@@ -2,7 +2,10 @@
 
 Engine methods are synchronous and run on a worker thread; they report
 progress through a JobContext and must call ctx.check_cancelled() whenever
-the library hands control back to them.
+the library hands control back to them. That call is also the pause point:
+while a pause request names the job (and the engine is pausable) it blocks
+until the job may continue, so it must only be made where another
+transcription on the same loaded model can safely run in between.
 """
 
 import gc
@@ -37,6 +40,7 @@ class Options:
     min_speakers: Optional[int] = None
     max_speakers: Optional[int] = None
     legacy_output: Optional[str] = None
+    job_id: Optional[str] = None
 
 
 def _opt_str(raw: dict, key: str) -> Optional[str]:
@@ -92,6 +96,7 @@ def parse_options(raw: Any) -> Options:
     o.diarize = _opt_bool(raw, "diarize")
     o.min_speakers = _opt_int(raw, "min_speakers")
     o.max_speakers = _opt_int(raw, "max_speakers")
+    o.job_id = _opt_str(raw, "job_id")
     o.legacy_output = _opt_str(raw, "legacy_output")
     if o.legacy_output is not None and o.legacy_output not in LEGACY_OUTPUTS:
         raise BadRequest(f"options.legacy_output must be one of {', '.join(LEGACY_OUTPUTS)} or null")
@@ -110,18 +115,25 @@ class Done:
 class JobContext:
     """JobContext connects an engine running on a thread to the HTTP stream."""
 
-    def __init__(self, emit: Callable[[dict], None], cancel_event: threading.Event, model: str, engine: str):
+    def __init__(self, emit: Callable[[dict], None], cancel_event: threading.Event, model: str, engine: str,
+                 checkpoint: Optional[Callable[[], None]] = None):
         self._emit = emit
         self.cancel_event = cancel_event
         self.model = model
         self.engine = engine
+        self._checkpoint = checkpoint
 
     def cancelled(self) -> bool:
         return self.cancel_event.is_set()
 
     def check_cancelled(self) -> None:
+        """check_cancelled raises JobCancelled for a canceled job, and pauses here when asked."""
         if self.cancel_event.is_set():
             raise JobCancelled()
+        if self._checkpoint is not None:
+            self._checkpoint()
+            if self.cancel_event.is_set():
+                raise JobCancelled()
 
     def info(self, language: str, language_probability: Optional[float], duration: float) -> None:
         self._emit(
@@ -218,6 +230,8 @@ class Engine:
 
     name = ""
     capabilities: Dict[str, bool] = {"word_timestamps": False, "vad_filter": False, "diarize": False, "translate": True}
+    # pausable engines may pause in check_cancelled; see the module docstring.
+    pausable = False
 
     def __init__(self, cfg: Config):
         self.cfg = cfg

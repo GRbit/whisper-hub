@@ -27,6 +27,9 @@ def cuda_available() -> bool:
 class FasterWhisperEngine(Engine):
     name = "faster_whisper"
     capabilities = {"word_timestamps": True, "vad_filter": True, "diarize": False, "translate": True}
+    # The segment generator keeps its decoding state to itself, so another
+    # transcription may use the model between two segments.
+    pausable = True
 
     def version(self) -> str:
         import ctranslate2
@@ -59,6 +62,7 @@ class FasterWhisperEngine(Engine):
         if opts.temperature is not None:
             # Not an upstream /asr option (it never sends one); used by the OpenAI frontend.
             options_dict["temperature"] = opts.temperature
+        ctx.check_cancelled()
         logger.debug("faster_whisper transcribe: beam_size=5 %s", {k: v for k, v in options_dict.items() if k != "initial_prompt"})
         segment_generator, info = handle.transcribe(audio, beam_size=5, **options_dict)
         language = options_dict.get("language", info.language)

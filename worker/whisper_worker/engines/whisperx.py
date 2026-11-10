@@ -51,6 +51,9 @@ def neutral(i: int, seg: dict) -> dict:
 
 class WhisperXEngine(Engine):
     name = "whisperx"
+    # Only between stages: the pipeline's tokenizer and options belong to the
+    # call in progress during transcribe, but are reset when it returns.
+    pausable = True
 
     def __init__(self, cfg):
         super().__init__(cfg)
@@ -110,6 +113,8 @@ class WhisperXEngine(Engine):
         # Upstream passes initial_prompt as a transcribe() kwarg, which this whisperx
         # version rejects with TypeError (HTTP 500). The pipeline takes it through its
         # TranscriptionOptions instead; temperature goes the same way.
+        # Before the options swap below, which must not be seen by another job.
+        ctx.check_cancelled()
         saved_options = pipeline.options
         overrides = {}
         if opts.prompt:

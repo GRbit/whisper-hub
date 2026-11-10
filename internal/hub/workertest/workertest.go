@@ -34,8 +34,12 @@ type Job struct {
 	// Model is Options.Model, or the info default when that was empty;
 	// Engine is the info engine.
 	Model, Engine string
+	// ID is Options.JobID, the id pause requests name.
+	ID string
 	// Ctx is canceled when the client disconnects.
 	Ctx context.Context
+
+	w *Worker
 }
 
 // TranscribeFunc scripts the response to one /v1/transcribe job.
@@ -58,6 +62,14 @@ type Worker struct {
 	inFlight    int
 	maxInFlight int
 	started     chan *Job
+
+	// Open pause requests per job id; changed is closed and replaced on
+	// every change so that waiting scripts wake up.
+	holds       map[string]int
+	changed     chan struct{}
+	pauses      []PauseRequest
+	acked       map[string]int
+	refusePause bool
 }
 
 // DefaultInfo is a faster_whisper worker serving "tiny" with all
@@ -89,12 +101,14 @@ func New(tb testing.TB, info Info) *Worker {
 // so a standalone fake (cmd/fakeworker) can set its own Listener before
 // calling Start.
 func NewUnstarted(info Info) *Worker {
-	w := &Worker{info: info, healthy: true, transcribe: Echo, started: make(chan *Job, 64)}
+	w := &Worker{info: info, healthy: true, transcribe: Echo, started: make(chan *Job, 64),
+		holds: map[string]int{}, changed: make(chan struct{}), acked: map[string]int{}}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", w.handleHealth)
 	mux.HandleFunc("GET /v1/info", w.handleInfo)
 	mux.HandleFunc("POST /v1/transcribe", w.handleTranscribe)
 	mux.HandleFunc("POST /v1/detect-language", w.handleDetect)
+	mux.HandleFunc("POST /v1/pause", w.handlePause)
 	w.Server = httptest.NewUnstartedServer(mux)
 	return w
 }
@@ -130,6 +144,67 @@ func (w *Worker) Jobs() []*Job {
 
 // MaxInFlight returns the highest number of concurrently running jobs seen.
 func (w *Worker) MaxInFlight() int { w.mu.Lock(); defer w.mu.Unlock(); return w.maxInFlight }
+
+// SetPauseRefused makes POST /v1/pause answer 409 not_pausable, as a worker
+// does whose engine cannot pause.
+func (w *Worker) SetPauseRefused(refuse bool) { w.mu.Lock(); w.refusePause = refuse; w.mu.Unlock() }
+
+// PauseRequests returns every pause request received so far, in order.
+func (w *Worker) PauseRequests() []PauseRequest {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return append([]PauseRequest(nil), w.pauses...)
+}
+
+// Paused returns how often the job with this id acknowledged a pause.
+func (w *Worker) Paused(id string) int { w.mu.Lock(); defer w.mu.Unlock(); return w.acked[id] }
+
+// handlePause holds a pause of the named job for as long as the client
+// keeps the request open, like the real worker. Scripts honor it only in
+// Stream.Await; a job may be paused before it arrives.
+func (w *Worker) handlePause(rw http.ResponseWriter, r *http.Request) {
+	var p PauseRequest
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&p); err != nil || p.JobID == "" || p.Model == "" {
+		writeError(rw, http.StatusBadRequest, "bad_request", fmt.Sprintf("pause request %+v: %v", p, err))
+		return
+	}
+	w.mu.Lock()
+	w.pauses = append(w.pauses, p)
+	refuse := w.refusePause
+	w.mu.Unlock()
+	if refuse {
+		writeError(rw, http.StatusConflict, "not_pausable", "this engine cannot pause")
+		return
+	}
+	w.hold(p.JobID, 1)
+	defer w.hold(p.JobID, -1)
+	rw.Header().Set("Content-Type", "application/x-ndjson")
+	rw.WriteHeader(http.StatusOK)
+	_, _ = io.WriteString(rw, `{"status":"pausing"}`+"\n")
+	if f, ok := rw.(http.Flusher); ok {
+		f.Flush()
+	}
+	<-r.Context().Done()
+}
+
+func (w *Worker) hold(id string, delta int) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.holds[id] += delta
+	if w.holds[id] <= 0 {
+		delete(w.holds, id)
+	}
+	close(w.changed)
+	w.changed = make(chan struct{})
+}
+
+func (w *Worker) holdState(id string) (held bool, changed <-chan struct{}) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.holds[id] > 0, w.changed
+}
 
 func (w *Worker) handleHealth(rw http.ResponseWriter, _ *http.Request) {
 	w.mu.Lock()
@@ -177,7 +252,7 @@ func (w *Worker) handleTranscribe(rw http.ResponseWriter, r *http.Request) {
 	w.mu.Lock()
 	f, info := w.transcribe, w.info
 	w.mu.Unlock()
-	job.Model, job.Engine = job.Options.Model, info.Engine
+	job.Model, job.Engine, job.ID, job.w = job.Options.Model, info.Engine, job.Options.JobID, w
 	if job.Model == "" {
 		job.Model = info.DefaultModel()
 	}
@@ -286,6 +361,49 @@ func (s *Stream) Segment(seg core.Segment) {
 	s.line(map[string]any{"type": "segment", "segment": seg})
 }
 
+// Await waits until release delivers (a value or a close) while honoring
+// pause requests the way the real worker does at a pause point: while a
+// pause of this job is held it writes a paused line, waits for the hold to
+// end, then writes a resumed line. It returns false when the client went
+// away.
+func (s *Stream) Await(job *Job, release <-chan struct{}) bool {
+	for {
+		held, changed := job.w.holdState(job.ID)
+		if held && job.ID != "" {
+			s.line(map[string]any{"type": "paused"})
+			job.w.mu.Lock()
+			job.w.acked[job.ID]++
+			job.w.mu.Unlock()
+			for held {
+				select {
+				case <-changed:
+					held, changed = job.w.holdState(job.ID)
+				case <-job.Ctx.Done():
+					return false
+				}
+			}
+			s.line(map[string]any{"type": "resumed"})
+			continue
+		}
+		select {
+		case <-release:
+			return true
+		case <-changed:
+		case <-job.Ctx.Done():
+			return false
+		}
+	}
+}
+
+// Pausing is Block that honors pause requests while it waits (see Await).
+func Pausing(release <-chan struct{}) TranscribeFunc {
+	return func(job *Job, s *Stream) {
+		if s.Await(job, release) {
+			Echo(job, s)
+		}
+	}
+}
+
 // Raw writes a literal line, for malformed or extended payloads.
 func (s *Stream) Raw(line string) {
 	if !s.started {
@@ -362,6 +480,8 @@ func statusFor(code string) int {
 		return http.StatusNotFound
 	case "unavailable":
 		return http.StatusServiceUnavailable
+	case "not_pausable":
+		return http.StatusConflict
 	default:
 		return http.StatusInternalServerError
 	}

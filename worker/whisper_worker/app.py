@@ -16,7 +16,7 @@ from . import __version__
 from .audio import check_pcm, duration
 from .config import Config
 from .engines.base import Engine, JobContext, parse_options
-from .errors import BadRequest, Internal, WorkerError
+from .errors import BadRequest, Internal, NotPausable, WorkerError
 from .languages import LANGUAGES
 from .models import Job, ModelManager
 
@@ -158,7 +158,9 @@ class WorkerApp:
                 await self.transcribe(scope, receive, send)
             elif path == "/v1/detect-language" and method == "POST":
                 await self.detect_language(scope, receive, send)
-            elif path in ("/healthz", "/v1/info", "/v1/transcribe", "/v1/detect-language"):
+            elif path == "/v1/pause" and method == "POST":
+                await self.pause(scope, receive, send)
+            elif path in ("/healthz", "/v1/info", "/v1/transcribe", "/v1/detect-language", "/v1/pause"):
                 await _send_json(send, 405, {"error": {"code": "method_not_allowed", "message": "method not allowed"}})
             else:
                 await _send_json(send, 404, {"error": {"code": "not_found", "message": "not found"}})
@@ -213,10 +215,10 @@ class WorkerApp:
             return
         logger.debug(
             "%s: model=%s task=%s language=%s prompt=%s temperature=%s vad=%s words=%s diarize=%s "
-            "speakers=%s..%s legacy_output=%s audio=%.2fs",
+            "speakers=%s..%s legacy_output=%s audio=%.2fs id=%s",
             label, model_id, opts.task, opts.language, bool(opts.prompt), opts.temperature, opts.vad_filter,
             opts.word_timestamps, opts.diarize, opts.min_speakers, opts.max_speakers, opts.legacy_output,
-            duration(pcm),
+            duration(pcm), opts.job_id,
         )
 
         loop = asyncio.get_running_loop()
@@ -224,11 +226,12 @@ class WorkerApp:
         manager = self.manager
 
         def work(handle, job: Job):
-            ctx = JobContext(manager.emitter(job, loop), job.cancel_event, model_id, engine.name)
+            ctx = JobContext(manager.emitter(job, loop), job.cancel_event, model_id, engine.name,
+                             job.checkpoint if engine.pausable else None)
             audio = engine.prepare_audio(pcm)
             return engine.transcribe(handle, audio, opts, ctx)
 
-        job = manager.submit(model_id, work, label)
+        job = manager.submit(model_id, work, label, opts.job_id, engine.pausable)
         await self._stream(job, label, started, receive, send, duration(pcm))
 
     async def _stream(self, job: Job, label: str, started: float, receive, send, audio_seconds: float):
@@ -262,6 +265,8 @@ class WorkerApp:
                                      value["segment"]["end"] or 0)
                     elif value["type"] == "info":
                         logger.debug("%s: info language=%s", label, value["language"])
+                    elif value["type"] in ("paused", "resumed"):
+                        logger.debug("%s %s after %d segments", label, value["type"], segments)
                     await send({"type": "http.response.body", "body": _json_line(value), "more_body": True})
                     continue
 
@@ -299,6 +304,54 @@ class WorkerApp:
             if not finished:
                 job.cancel()
             disconnect.cancel()
+
+    async def pause(self, scope, receive, send):
+        """pause holds a pause of one job for as long as the request stays open (docs/worker-api.md)."""
+        try:
+            raw = b""
+            while True:
+                message = await receive()
+                if message["type"] == "http.disconnect":
+                    raise _Disconnected()
+                raw += message.get("body", b"")
+                if not message.get("more_body", False):
+                    break
+            try:
+                body = json.loads(raw)
+            except ValueError:
+                raise BadRequest("pause body is not valid JSON") from None
+            if not isinstance(body, dict) or not isinstance(body.get("job_id"), str) or not body["job_id"]:
+                raise BadRequest("pause body needs a job_id string")
+            model = body.get("model")
+            if model is not None and not isinstance(model, str):
+                raise BadRequest("pause model must be a string or null")
+            job_id = body["job_id"]
+            if not self.engine.pausable:
+                raise NotPausable("this engine cannot pause")
+            if not self.manager.pause_fits(job_id, model):
+                raise NotPausable("the next model would not fit beside the paused one")
+        except WorkerError as e:
+            logger.debug("pause rejected: %s %s", e.code, e.message)
+            await _send_error(send, e)
+            return
+        logger.debug("pause requested: job=%s for model=%s", job_id, model)
+        self.manager.hold(job_id, 1)
+        disconnect = asyncio.ensure_future(receive())
+        ended = asyncio.ensure_future(self.manager.wait_ended(job_id))
+        try:
+            await send({"type": "http.response.start", "status": 200,
+                        "headers": [(b"content-type", b"application/x-ndjson"), (b"cache-control", b"no-cache")]})
+            await send({"type": "http.response.body", "body": _json_line({"status": "pausing"}), "more_body": True})
+            await asyncio.wait({disconnect, ended}, return_when=asyncio.FIRST_COMPLETED)
+            if ended.done():
+                await send({"type": "http.response.body", "body": b"", "more_body": False})
+        except OSError:
+            pass
+        finally:
+            self.manager.hold(job_id, -1)
+            disconnect.cancel()
+            ended.cancel()
+            logger.debug("pause released: job=%s", job_id)
 
     async def detect_language(self, scope, receive, send):
         self._jobs += 1

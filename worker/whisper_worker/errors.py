@@ -40,6 +40,13 @@ class Unavailable(WorkerError):
     code = "unavailable"
 
 
+class NotPausable(WorkerError):
+    """NotPausable refuses a pause request the worker could not honor."""
+
+    status = 409
+    code = "not_pausable"
+
+
 class Internal(WorkerError):
     """Internal means the engine failed while running the job."""
 

@@ -54,7 +54,7 @@ func (h *Hub) transcribe(ctx context.Context, req *core.Request, onSegment func(
 		return nil, err
 	}
 	defer h.release(w)
-	res, err := w.client.Transcribe(ctx, opts, req.Audio, onSegment)
+	res, err := w.client.Transcribe(ctx, opts, req.Audio, onSegment, nil)
 	if err != nil {
 		if core.KindOf(err) == core.KindUnavailable {
 			w.kickProbe()

@@ -60,7 +60,7 @@ func TestTranscribeStreamsSegmentsAndSendsOptions(t *testing.T) {
 	audio := pcm(2.5)
 	var got []int
 	res, err := c.Transcribe(context.Background(), workerclient.OptionsFromRequest("tiny", req), audio,
-		func(s core.Segment) error { got = append(got, s.ID); return nil })
+		func(s core.Segment) error { got = append(got, s.ID); return nil }, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,7 +101,7 @@ func TestTranscribeDeliversSegmentsBeforeDone(t *testing.T) {
 		_, err := c.Transcribe(context.Background(), workerclient.Options{}, pcm(1), func(core.Segment) error {
 			close(seen)
 			return nil
-		})
+		}, nil)
 		done <- err
 	}()
 	select {
@@ -125,7 +125,7 @@ func TestTranscribeToleratesNullsAndUnknownFields(t *testing.T) {
 		s.Raw(`{"type":"done","text":" hi yo","language":"en","rendered":null}`)
 	})
 	c := newClient(t, w.URL, workerclient.Config{})
-	res, err := c.Transcribe(context.Background(), workerclient.Options{}, pcm(1), nil)
+	res, err := c.Transcribe(context.Background(), workerclient.Options{}, pcm(1), nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -156,7 +156,7 @@ func TestTranscribeErrors(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			w.SetTranscribe(tc.script)
-			_, err := c.Transcribe(context.Background(), workerclient.Options{}, pcm(1), nil)
+			_, err := c.Transcribe(context.Background(), workerclient.Options{}, pcm(1), nil, nil)
 			wantKind(t, err, tc.kind)
 			if strings.Contains(core.ClientMessage(err), "Traceback") || strings.Contains(core.ClientMessage(err), "CUDA") {
 				t.Fatalf("worker internals leaked into client message %q", core.ClientMessage(err))
@@ -171,7 +171,7 @@ func TestPlainHTTPErrorWithoutJSONBody(t *testing.T) {
 	}))
 	defer srv.Close()
 	c := newClient(t, srv.URL, workerclient.Config{})
-	_, err := c.Transcribe(context.Background(), workerclient.Options{}, pcm(1), nil)
+	_, err := c.Transcribe(context.Background(), workerclient.Options{}, pcm(1), nil, nil)
 	wantKind(t, err, core.KindModelNotFound)
 }
 
@@ -180,7 +180,7 @@ func TestTranscribeConnectionRefusedIsUnavailable(t *testing.T) {
 	url := srv.URL
 	srv.Close()
 	c := newClient(t, url, workerclient.Config{})
-	_, err := c.Transcribe(context.Background(), workerclient.Options{}, pcm(1), nil)
+	_, err := c.Transcribe(context.Background(), workerclient.Options{}, pcm(1), nil, nil)
 	wantKind(t, err, core.KindUnavailable)
 	wantKind(t, c.Health(context.Background()), core.KindUnavailable)
 }
@@ -199,7 +199,7 @@ func TestCancelPropagatesToWorker(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	errc := make(chan error, 1)
 	go func() {
-		_, err := c.Transcribe(ctx, workerclient.Options{}, pcm(1), nil)
+		_, err := c.Transcribe(ctx, workerclient.Options{}, pcm(1), nil, nil)
 		errc <- err
 	}()
 	<-w.Started()
@@ -223,7 +223,7 @@ func TestSegmentCallbackErrorAbortsJob(t *testing.T) {
 	})
 	c := newClient(t, w.URL, workerclient.Config{})
 	boom := errors.New("client write failed")
-	_, err := c.Transcribe(context.Background(), workerclient.Options{}, pcm(1), func(core.Segment) error { return boom })
+	_, err := c.Transcribe(context.Background(), workerclient.Options{}, pcm(1), func(core.Segment) error { return boom }, nil)
 	wantKind(t, err, core.KindCanceled)
 	if !errors.Is(err, boom) {
 		t.Fatalf("cause lost: %v", err)
@@ -239,7 +239,7 @@ func TestFirstByteTimeout(t *testing.T) {
 	w := workertest.New(t, workertest.DefaultInfo())
 	w.SetTranscribe(func(job *workertest.Job, s *workertest.Stream) { <-job.Ctx.Done() })
 	c := newClient(t, w.URL, workerclient.Config{FirstByteTimeout: 50 * time.Millisecond})
-	_, err := c.Transcribe(context.Background(), workerclient.Options{}, pcm(1), nil)
+	_, err := c.Transcribe(context.Background(), workerclient.Options{}, pcm(1), nil, nil)
 	wantKind(t, err, core.KindUnavailable)
 }
 
@@ -253,7 +253,7 @@ func TestNoTimeoutAfterFirstByte(t *testing.T) {
 		s.Done("", "en", nil)
 	})
 	c := newClient(t, w.URL, workerclient.Config{FirstByteTimeout: 50 * time.Millisecond})
-	if _, err := c.Transcribe(context.Background(), workerclient.Options{}, pcm(1), nil); err != nil {
+	if _, err := c.Transcribe(context.Background(), workerclient.Options{}, pcm(1), nil, nil); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -266,12 +266,12 @@ func TestLongLine(t *testing.T) {
 		s.Done(big, "en", nil)
 	})
 	c := newClient(t, w.URL, workerclient.Config{})
-	res, err := c.Transcribe(context.Background(), workerclient.Options{}, pcm(1), nil)
+	res, err := c.Transcribe(context.Background(), workerclient.Options{}, pcm(1), nil, nil)
 	if err != nil || res.Text != big {
 		t.Fatalf("err %v len %d", err, len(res.Text))
 	}
 	c2 := newClient(t, w.URL, workerclient.Config{MaxLineBytes: 100 << 10})
-	_, err = c2.Transcribe(context.Background(), workerclient.Options{}, pcm(1), nil)
+	_, err = c2.Transcribe(context.Background(), workerclient.Options{}, pcm(1), nil, nil)
 	wantKind(t, err, core.KindInternal)
 }
 
@@ -312,7 +312,7 @@ func TestTranscribeToleratesPythonNonFiniteNumbers(t *testing.T) {
 		s.Raw(`{"type":"done","text":" NaN","language":"en"}`)
 	})
 	c := newClient(t, w.URL, workerclient.Config{})
-	res, err := c.Transcribe(context.Background(), workerclient.Options{}, pcm(1), nil)
+	res, err := c.Transcribe(context.Background(), workerclient.Options{}, pcm(1), nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -321,6 +321,73 @@ func TestTranscribeToleratesPythonNonFiniteNumbers(t *testing.T) {
 		t.Fatalf("segment %+v result %+v", seg, res)
 	}
 	w.SetTranscribe(func(job *workertest.Job, s *workertest.Stream) { s.Raw(`{"type":"info",NaNx}`) })
-	_, err = c.Transcribe(context.Background(), workerclient.Options{}, pcm(1), nil)
+	_, err = c.Transcribe(context.Background(), workerclient.Options{}, pcm(1), nil, nil)
 	wantKind(t, err, core.KindInternal)
+}
+
+// A pause lasts as long as the Pause call: the worker reports it in the
+// job's stream (paused, then resumed once the call returns), and the
+// paused line also ends the first-byte wait, so a job paused before its
+// first output is not mistaken for a stuck worker.
+func TestPauseHoldsUntilContextEnds(t *testing.T) {
+	w := workertest.New(t, workertest.DefaultInfo())
+	release := make(chan struct{})
+	w.SetTranscribe(workertest.Pausing(release))
+	c := newClient(t, w.URL, workerclient.Config{FirstByteTimeout: 300 * time.Millisecond})
+	opts := workerclient.Options{Model: "tiny", Task: core.TaskTranscribe, JobID: "j1"}
+	events := make(chan bool, 4)
+	type out struct {
+		res *core.Result
+		err error
+	}
+	done := make(chan out, 1)
+	go func() {
+		res, err := c.Transcribe(context.Background(), opts, pcm(1), nil, func(paused bool) { events <- paused })
+		done <- out{res, err}
+	}()
+	<-w.Started()
+	ctx, cancel := context.WithCancel(context.Background())
+	paused := make(chan error, 1)
+	go func() { paused <- c.Pause(ctx, "j1", "tiny") }()
+	if p := <-events; !p {
+		t.Fatal("first event is not paused")
+	}
+	// Paused for longer than the first-byte timeout: still alive.
+	time.Sleep(500 * time.Millisecond)
+	select {
+	case o := <-done:
+		t.Fatalf("job ended while paused: %+v", o)
+	default:
+	}
+	cancel()
+	if err := <-paused; err != nil {
+		t.Fatalf("Pause: %v", err)
+	}
+	if p := <-events; p {
+		t.Fatal("second event is not resumed")
+	}
+	close(release)
+	o := <-done
+	if o.err != nil || o.res.Text != " s0" {
+		t.Fatalf("result %+v, %v", o.res, o.err)
+	}
+	if got := w.PauseRequests(); len(got) != 1 || got[0] != (workertest.PauseRequest{JobID: "j1", Model: "tiny"}) {
+		t.Fatalf("pause requests %+v", got)
+	}
+	if !strings.Contains(string(w.Jobs()[0].RawOptions), `"job_id":"j1"`) {
+		t.Fatalf("options %s", w.Jobs()[0].RawOptions)
+	}
+}
+
+func TestPauseRefused(t *testing.T) {
+	w := workertest.New(t, workertest.DefaultInfo())
+	w.SetPauseRefused(true)
+	c := newClient(t, w.URL, workerclient.Config{})
+	err := c.Pause(context.Background(), "j1", "tiny")
+	if err == nil {
+		t.Fatal("refused pause returned nil")
+	}
+	if !errors.Is(err, workerclient.ErrNotPausable) {
+		t.Fatalf("err = %v, want ErrNotPausable", err)
+	}
 }
