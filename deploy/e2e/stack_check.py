@@ -3,8 +3,10 @@ client call shapes), the openai SDK, the wyoming package and a Home
 Assistant STT replay. Run by deploy/e2e/stack.sh inside the e2e image.
 
 --mode fake: the Python fake worker (deterministic text, prompt directives
-for delays), adds streaming timing, cancellation and priority checks.
---mode real: a real model on /audio/english-front-center.*, checks words.
+for delays), adds streaming timing, cancellation, priority and preemption
+checks (pause, and the timeout path with a fake that ignores the pause).
+--mode real: a real model on /audio/english-front-center.*, checks words,
+and a Wyoming utterance overtaking a long running legacy job.
 """
 
 import argparse
@@ -183,15 +185,24 @@ async def wyoming_round_trip(addr, pcm, label, want):
 
 def priority(t, audio, wav_name, pcm):
     # A long legacy job runs, two more wait; a Wyoming utterance sent last
-    # must run right after the running one. stack.sh checks the usage log.
-    done = []
+    # pauses the long job, finishes first, and the long job then continues
+    # with the body of an uninterrupted run, ahead of the two queued ones.
+    # stack.sh checks the usage log of these four jobs.
+    long_prompt = "fake:delay=0.5,segments=6"
+    st, _, reference = post(t, "/asr?" + urllib.parse.urlencode({"output": "srt", "initial_prompt": long_prompt}),
+                            wav_name, audio)
+    check("priority: uninterrupted reference", st == 200, st)
+    done, bodies = [], {}
+    lock = threading.Lock()
 
     def legacy_job(name, prompt):
-        q = "/asr?" + urllib.parse.urlencode({"output": "txt", "initial_prompt": prompt})
-        st, _, _ = post(t, q, wav_name, audio)
-        done.append((name, st))
+        q = "/asr?" + urllib.parse.urlencode({"output": "srt", "initial_prompt": prompt})
+        st, _, body = post(t, q, wav_name, audio)
+        with lock:
+            done.append(name)
+            bodies[name] = (st, body)
 
-    threads = [threading.Thread(target=legacy_job, args=("long", "fake:delay=0.5,segments=6"))]
+    threads = [threading.Thread(target=legacy_job, args=("long", long_prompt))]
     threads[0].start()
     time.sleep(0.8)
     for n in ("queued1", "queued2"):
@@ -199,12 +210,84 @@ def priority(t, audio, wav_name, pcm):
         th.start()
         threads.append(th)
         time.sleep(0.3)
+    start = time.monotonic()
     asyncio.run(wyoming_utterance(t.wyoming, pcm))
-    done.append(("wyoming", 200))
+    wy = time.monotonic() - start
+    with lock:
+        done.append("wyoming")
     for th in threads:
         th.join()
-    order = [n for n, _ in done]
-    check("priority: wyoming overtakes queued jobs", order == ["long", "wyoming", "queued1", "queued2"], order)
+    check("priority: wyoming pauses the running job and finishes first",
+          done == ["wyoming", "long", "queued1", "queued2"] and wy < 1.5, (done, round(wy, 2)))
+    check("priority: the paused job's body equals an uninterrupted run", bodies["long"] == (200, reference),
+          (bodies["long"][0], bodies["long"][1][:120], reference[:120]))
+
+
+def preempt_timeout(t, audio, wav_name, pcm):
+    # The fake ignores the pause here, so after hub.preempt_timeout (2 s in
+    # stack.sh) the long job is canceled, Wyoming runs, and the long job
+    # restarts from the beginning: same body, one request for its client.
+    long_prompt = "fake:delay=0.5,segments=8,pause=ignore"
+    q = "/asr?" + urllib.parse.urlencode({"output": "vtt", "initial_prompt": long_prompt})
+    st, _, reference = post(t, q, wav_name, audio)
+    check("preempt timeout: uninterrupted reference", st == 200, st)
+    result, done = {}, []
+
+    def long_job():
+        result["long"] = post(t, q, wav_name, audio)
+        done.append("long")
+
+    th = threading.Thread(target=long_job)
+    th.start()
+    time.sleep(1)
+    start = time.monotonic()
+    asyncio.run(wyoming_utterance(t.wyoming, pcm))
+    wy = time.monotonic() - start
+    done.append("wyoming")
+    th.join()
+    st, _, body = result["long"]
+    check("preempt timeout: wyoming waits about preempt_timeout, then runs first",
+          done == ["wyoming", "long"] and 1.5 < wy < 4, (done, round(wy, 2)))
+    check("preempt timeout: the restarted job's body equals an uninterrupted run", st == 200 and body == reference,
+          (st, body[:120], reference[:120]))
+
+
+def preempt_real(t, pcm):
+    # A long legacy job (2 minutes of German) runs; a Wyoming utterance sent
+    # into it must finish first, by a pause or by the timeout path (cancel
+    # and restart), and the long job's body must equal an uninterrupted run.
+    # stack.sh reads from the gateway log which of the two happened.
+    long_wav = open("/audio/german-long.wav", "rb").read()
+    q = "/asr?output=json&language=de"
+    start = time.monotonic()
+    st, _, reference = post(t, q, "long.wav", long_wav)
+    ref_s = time.monotonic() - start
+    check("preempt: uninterrupted reference", st == 200, st)
+    st2, _, again = post(t, q, "long.wav", long_wav)
+    deterministic = st2 == 200 and again == reference
+    result, done = {}, []
+
+    def long_job():
+        result["long"] = post(t, q, "long.wav", long_wav)
+        done.append("long")
+
+    th = threading.Thread(target=long_job)
+    th.start()
+    time.sleep(min(2.0, ref_s / 4))
+    start = time.monotonic()
+    asyncio.run(wyoming_utterance(t.wyoming, pcm))
+    wy = time.monotonic() - start
+    done.append("wyoming")
+    th.join()
+    st, _, body = result["long"]
+    print(f"     reference took {ref_s:.1f}s; wyoming answered after {wy:.1f}s", flush=True)
+    check("preempt: wyoming finishes before the running long job", done == ["wyoming", "long"], done)
+    if deterministic:
+        check("preempt: the long job's body equals an uninterrupted run", st == 200 and body == reference,
+              (st, body[:160], reference[:160]))
+    else:
+        print("     the engine gave two different uninterrupted bodies; identity is not checked", flush=True)
+        check("preempt: the long job succeeded", st == 200, st)
 
 
 async def wyoming_utterance(addr, pcm):
@@ -225,7 +308,7 @@ def main():
     ap.add_argument("--mode", choices=("fake", "real"), required=True)
     ap.add_argument("--basic", help="user:password for legacy paths")
     ap.add_argument("--key", help="API key for the OpenAI paths")
-    ap.add_argument("--only", default="legacy,sdk,wyoming,cancel,priority")
+    ap.add_argument("--only", default="legacy,sdk,wyoming,cancel,priority,preempt")
     a = ap.parse_args()
     t = Target(a)
     only = a.only.split(",")
@@ -250,6 +333,10 @@ def main():
         cancellation(t, wav, "english-front-center.wav")
     if a.mode == "fake" and "priority" in only:
         priority(t, wav, "english-front-center.wav", pcm)
+    if a.mode == "fake" and "preempt" in only:
+        preempt_timeout(t, wav, "english-front-center.wav", pcm)
+    if a.mode == "real" and "preempt" in only:
+        preempt_real(t, pcm)
     print(f"{len(failures)} failure(s)")
     sys.exit(1 if failures else 0)
 

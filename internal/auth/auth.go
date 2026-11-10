@@ -157,5 +157,10 @@ func matchGlob(pattern, s string) bool {
 }
 
 func identityOf(u *account) *core.Identity {
-	return &core.Identity{User: u.Name, Models: slices.Clone(u.Models)}
+	id := &core.Identity{User: u.Name, Models: slices.Clone(u.Models)}
+	if u.Priority != nil {
+		p := *u.Priority
+		id.Priority = &p
+	}
+	return id
 }

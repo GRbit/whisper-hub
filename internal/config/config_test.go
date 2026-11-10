@@ -201,6 +201,7 @@ var zeroByDefault = map[string]bool{
 	"audio.failed_uploads_dir":       true,
 	"hub.default_model":              true, // chosen at run time from the workers
 	"hub.aliases.whisper-1":          true, // "" is the default model
+	"hub.priorities.admin":           true, // null: the protocol default applies
 	"auth.users_file":                true,
 	"auth.trust_forwarded":           true,
 	"auth.wyoming.allow_cidrs":       true,
@@ -303,10 +304,15 @@ func TestYAMLKeepsSetValuesAndKeys(t *testing.T) {
 		"WHISPER_HUB_AUTH_RATE_LIMIT_FAILURES", "-1",
 		"WHISPER_HUB_WYOMING_MAX_CONNECTIONS", "-1",
 		"WHISPER_HUB_WYOMING_PROGRAM_NAME", "kitchen",
+		"WHISPER_HUB_HUB_PRIORITIES_LEGACY", "0",
+		"WHISPER_HUB_HUB_PRIORITIES_ADMIN", "-7",
+		"WHISPER_HUB_HUB_PREEMPT_TIMEOUT", "-1s",
 	)))
 	for k, want := range map[string]any{
 		"hub.queue_length": 7, "hub.retry_min": "3s", "auth.rate_limit.failures": -1,
 		"wyoming.max_connections": -1, "wyoming.program_name": "kitchen", "wyoming.zeroconf.name": "kitchen",
+		// A priority of 0 is a value, not "unset".
+		"hub.priorities.legacy": 0, "hub.priorities.admin": -7, "hub.priorities.wyoming": 100, "hub.preempt_timeout": "-1s",
 	} {
 		if flat[k] != want {
 			t.Errorf("%s = %v, want %v", k, flat[k], want)

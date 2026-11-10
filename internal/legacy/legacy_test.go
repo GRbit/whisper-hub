@@ -67,7 +67,7 @@ func TestASRRequestMapping(t *testing.T) {
 	if r.LegacyOutput != "txt" || resp.Header.Get("Content-Disposition") != `attachment; filename="english-front-center.wav.foo"` {
 		t.Errorf("output: %q, %q", r.LegacyOutput, resp.Header.Get("Content-Disposition"))
 	}
-	if r.Model != "whisper-1" || r.Priority != core.PriorityNormal || r.Protocol != core.ProtocolLegacy || r.Endpoint != "/asr" {
+	if r.Model != "whisper-1" || r.Protocol != core.ProtocolLegacy || r.Endpoint != "/asr" {
 		t.Errorf("routing fields: %+v", r)
 	}
 	if want := 22848 * 2; len(r.Audio) != want {
@@ -182,7 +182,7 @@ func TestDetectJSONFloats(t *testing.T) {
 	if body != want {
 		t.Errorf("body %s, want %s", body, want)
 	}
-	if r := svc.detects[0]; r.Endpoint != "/detect-language" || r.Protocol != core.ProtocolLegacy || r.Priority != core.PriorityNormal {
+	if r := svc.detects[0]; r.Endpoint != "/detect-language" || r.Protocol != core.ProtocolLegacy {
 		t.Errorf("detect request %+v", r)
 	}
 }

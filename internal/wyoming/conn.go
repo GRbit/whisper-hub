@@ -423,7 +423,6 @@ func (c *conn) transcribe(u *utterance) bool {
 		Model:    u.req.model,
 		Task:     core.TaskTranscribe,
 		Language: lang,
-		Priority: core.PriorityInteractive,
 		Protocol: core.ProtocolWyoming,
 		Endpoint: typeTranscribe,
 	}

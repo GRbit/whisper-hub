@@ -438,7 +438,6 @@ func (s *Server) handleASR(w http.ResponseWriter, r *http.Request) {
 		// Upstream renders unknown output values as txt but still names
 		// the file after them.
 		LegacyOutput: legacyOutput(output),
-		Priority:     core.PriorityNormal,
 		Protocol:     core.ProtocolLegacy,
 		Endpoint:     "/asr",
 	}
@@ -504,7 +503,6 @@ func (s *Server) handleDetect(w http.ResponseWriter, r *http.Request) {
 	det, err := s.svc.DetectLanguage(r.Context(), &core.DetectRequest{
 		Audio:    pcm,
 		Model:    modelName,
-		Priority: core.PriorityNormal,
 		Protocol: core.ProtocolLegacy,
 		Endpoint: "/detect-language",
 	})

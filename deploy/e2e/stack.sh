@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # End-to-end runs against real containers (see stack_check.py):
 #   deploy/e2e/stack.sh fake   gateway image + Python fake worker image: protocols,
-#                              streaming, cancellation, priority (usage log), auth on and off
+#                              streaming, cancellation, priority and preemption (usage
+#                              log), auth on and off
 #   deploy/e2e/stack.sh real   all-in-one image, model tiny on CPU, real audio. ENGINE picks
 #                              the image (whisper-hub:$ENGINE), WHISPER_HUB_ENGINE is passed to it if set.
 # Images: GATEWAY_IMAGE, WORKER_IMAGE, AIO_IMAGE, E2E_IMAGE (built by make).
@@ -12,7 +13,7 @@ mode="${1:?usage: stack.sh fake|real}"
 gateway_image="${GATEWAY_IMAGE:-whisper-hub-gateway:latest}"
 worker_image="${WORKER_IMAGE:-whisper-hub-worker:fake}"
 aio_image="${AIO_IMAGE:-whisper-hub:${ENGINE:-faster_whisper}}"
-aio_env=(-e WHISPER_HUB_ENGINE_MODEL=tiny)
+aio_env=(-e WHISPER_HUB_ENGINE_MODEL=tiny -e WHISPER_HUB_LOG_LEVEL=debug)
 [ -n "${WHISPER_HUB_ENGINE:-}" ] && aio_env+=(-e "WHISPER_HUB_ENGINE=$WHISPER_HUB_ENGINE")
 e2e_image="${E2E_IMAGE:-whisper-hub-e2e:latest}"
 cache_volume="${CACHE_VOLUME:-whub-e2e-cache}"
@@ -46,6 +47,8 @@ fi
 ffmpeg -v error -i "$voice/english-front-center.wav" -f s16le -ac 1 -ar 16000 "$work/audio/english-front-center.pcm"
 # ffmpeg's default MP4 layout puts the moov atom last, as Android MediaMuxer does.
 ffmpeg -v error -i "$voice/german-20s.wav" -c:a aac -b:a 96k "$work/audio/german-trailing-moov.m4a"
+# Two minutes for the preemption check of real mode.
+ffmpeg -v error -stream_loop 5 -i "$voice/german-20s.wav" -ac 1 -ar 16000 "$work/audio/german-long.wav"
 chmod -R a+rX "$work"
 
 wait_healthy() { # container port
@@ -80,7 +83,7 @@ if [ "$mode" = fake ]; then
 	docker run -d --name whub-s-worker --network "$net" "$worker_image" >/dev/null
 	gw_env=(-e 'WHISPER_HUB_HUB_WORKERS=[{url: "http://whub-s-worker:9100"}]' -e WHISPER_HUB_LOG_LEVEL=debug)
 	docker run -d --name whub-s-gw --network "$net" -v "$work/data:/data" "${gw_env[@]}" \
-		-e WHISPER_HUB_AUTH_USAGE_LOG_FILE=/data/requests.jsonl "$gateway_image" >/dev/null
+		-e WHISPER_HUB_AUTH_USAGE_LOG_FILE=/data/requests.jsonl -e WHISPER_HUB_HUB_PREEMPT_TIMEOUT=2s "$gateway_image" >/dev/null
 	docker run -d --name whub-s-gw-auth --network "$net" -v "$work:/work:ro" "${gw_env[@]}" \
 		-e WHISPER_HUB_AUTH_USERS_FILE=/work/users.yaml "$gateway_image" >/dev/null
 	wait_healthy whub-s-gw 9000
@@ -90,23 +93,33 @@ if [ "$mode" = fake ]; then
 	check --mode fake --http http://whub-s-gw:9000 --wyoming whub-s-gw:10300 || status=1
 	code=$(docker run --rm --network "$net" --entrypoint python3 "$e2e_image" -c "import urllib.request; print(urllib.request.urlopen('http://whub-s-gw:9000/_hub/usage').status)" 2>/dev/null || true)
 	[ "$code" = 200 ] && echo "ok   usage endpoint with auth off -> 200" || { echo "FAIL usage endpoint with auth off -> $code"; status=1; }
-	echo "== usage log: priority order"
+	echo "== usage log: priority and preemption"
 	# The log is private to the gateway user (0600), so read it through the container.
 	docker exec whub-s-gw cat /data/requests.jsonl >"$work/requests.jsonl"
 	python3 - "$work/requests.jsonl" <<'PY' || status=1
 import json, sys
 lines = [json.loads(l) for l in open(sys.argv[1])]
-# The priority scenario is the last four jobs; the log is written at completion.
-last = lines[-4:]
-order = [l["endpoint"] for l in last]
-w = next(l for l in last if l["protocol"] == "wyoming")
-long_, q1, q2 = [l for l in last if l["protocol"] == "legacy"]
-ok = (order == ["/asr", "transcribe", "/asr", "/asr"] and w["queued_ms"] < long_["elapsed_ms"]
-      and q1["queued_ms"] > w["queued_ms"] and q2["queued_ms"] > w["queued_ms"])
-print(("ok   " if ok else "FAIL ") + "usage log: wyoming queued %d ms behind the running job only; queued jobs waited %d and %d ms"
-      % (w["queued_ms"], q1["queued_ms"], q2["queued_ms"]))
-sys.exit(0 if ok else 1)
+# Written at completion. The pause scenario's four jobs, then the timeout
+# scenario's reference, Wyoming and the restarted job are the last seven.
+w, long_, q1, q2 = lines[-7:-3]
+w2, long2 = lines[-2:]
+ok = ([l["endpoint"] for l in (w, long_, q1, q2)] == ["transcribe", "/asr", "/asr", "/asr"]
+      and all(l["status"] == "ok" for l in lines[-7:])
+      # paused from before Wyoming started until after it ended (ms rounding aside)
+      and long_["queued_ms"] + 2 >= w["elapsed_ms"] - w["queued_ms"] and q1["queued_ms"] > w["queued_ms"] and q2["queued_ms"] > w["queued_ms"])
+print(("ok   " if ok else "FAIL ") + "usage log: wyoming queued %d ms, ran %d ms; the paused job counts %d ms as queued; "
+      "queued jobs waited %d and %d ms" % (w["queued_ms"], w["elapsed_ms"] - w["queued_ms"], long_["queued_ms"],
+                                           q1["queued_ms"], q2["queued_ms"]))
+ok2 = (w2["endpoint"] == "transcribe" and long2["endpoint"] == "/asr" and 1500 <= w2["queued_ms"] < 4000
+       and long2["status"] == "ok")
+print(("ok   " if ok2 else "FAIL ") + "usage log: one record for the restarted job (status %s, queued %d ms of %d); "
+      "wyoming waited %d ms for the timeout" % (long2["status"], long2["queued_ms"], long2["elapsed_ms"], w2["queued_ms"]))
+sys.exit(0 if ok and ok2 else 1)
 PY
+	n=$(docker logs whub-s-gw 2>&1 | grep -c 'msg="job paused"' || true)
+	r=$(docker logs whub-s-gw 2>&1 | grep -c 'msg="job canceled for restart"' || true)
+	[ "$n" -ge 1 ] && [ "$r" = 1 ] && echo "ok   gateway log: $n pause(s), $r cancel for restart" \
+		|| { echo "FAIL gateway log: $n pause(s), $r cancel(s) for restart"; status=1; }
 	echo "== fake worker, auth on (Basic for legacy, API key for OpenAI, Wyoming as wyoming)"
 	check --mode fake --http http://whub-s-gw-auth:9000 --wyoming whub-s-gw-auth:10300 \
 		--basic alice:e2e-secret --key "$key" --only legacy,sdk,wyoming || status=1
@@ -122,6 +135,9 @@ else
 	running="$(docker logs whub-s-aio 2>&1 | grep 'msg="worker up"' | grep -o 'engine=[a-z_]*' | head -1)"
 	echo "== all-in-one $aio_image ${WHISPER_HUB_ENGINE:+WHISPER_HUB_ENGINE=$WHISPER_HUB_ENGINE }-> $running, model tiny"
 	check --mode real --http http://whub-s-aio:9000 --wyoming whub-s-aio:10300 || status=1
+	p=$(docker logs whub-s-aio 2>&1 | grep -c 'msg="job paused"' || true)
+	r=$(docker logs whub-s-aio 2>&1 | grep -c 'msg="job canceled for restart"' || true)
+	echo "     gateway log: $p pause(s), $r cancel(s) for restart"
 	docker rm -f whub-s-aio >/dev/null
 fi
 if [ "$status" != 0 ]; then

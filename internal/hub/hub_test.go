@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -158,6 +159,11 @@ func async(h *hub.Hub, ctx context.Context, r *core.Request, out chan<- outcome)
 		res, err := h.Transcribe(ctx, r, nil)
 		out <- outcome{r.Prompt, res, err}
 	}()
+}
+
+// as returns a context whose caller has the users file priority p.
+func as(p int) context.Context {
+	return core.WithIdentity(context.Background(), &core.Identity{User: fmt.Sprintf("p%d", p), Models: []string{"*"}, Priority: &p})
 }
 
 func twoModelInfo() workertest.Info {
@@ -456,21 +462,19 @@ func TestPriorityOrderFIFOWithinPriority(t *testing.T) {
 	w := workertest.New(t, workertest.DefaultInfo())
 	gate := make(chan struct{})
 	w.SetTranscribe(gated(gate))
-	e := start(t, hub.Config{}, nil, 1, w)
+	e := start(t, hub.Config{PreemptTimeout: -1}, nil, 1, w)
 	out := make(chan outcome, 8)
 	async(e.hub, context.Background(), req("holder"), out)
 	nextStarted(t, w)
 	queue := []struct {
 		name string
-		p    core.Priority
+		p    int
 	}{
-		{"batch1", core.PriorityBatch}, {"normal1", core.PriorityNormal}, {"batch2", core.PriorityBatch},
-		{"inter1", core.PriorityInteractive}, {"normal2", core.PriorityNormal}, {"inter2", core.PriorityInteractive},
+		{"batch1", -3}, {"normal1", 50}, {"batch2", -3},
+		{"inter1", 100}, {"normal2", 50}, {"inter2", 100},
 	}
 	for i, q := range queue {
-		r := req(q.name)
-		r.Priority = q.p
-		async(e.hub, context.Background(), r, out)
+		async(e.hub, as(q.p), req(q.name), out)
 		waitQueued(t, e.hub, i+1)
 	}
 	for _, want := range []string{"inter1", "inter2", "normal1", "normal2", "batch1", "batch2"} {
@@ -491,18 +495,14 @@ func TestWaitingDoesNotRaisePriority(t *testing.T) {
 	w := workertest.New(t, workertest.DefaultInfo())
 	gate := make(chan struct{})
 	w.SetTranscribe(gated(gate))
-	e := start(t, hub.Config{}, nil, 1, w)
+	e := start(t, hub.Config{PreemptTimeout: -1}, nil, 1, w)
 	out := make(chan outcome, 3)
 	async(e.hub, context.Background(), req("holder"), out)
 	nextStarted(t, w)
-	b := req("batch")
-	b.Priority = core.PriorityBatch
-	async(e.hub, context.Background(), b, out)
+	async(e.hub, as(0), req("batch"), out)
 	waitQueued(t, e.hub, 1)
 	time.Sleep(60 * time.Millisecond)
-	i := req("interactive")
-	i.Priority = core.PriorityInteractive
-	async(e.hub, context.Background(), i, out)
+	async(e.hub, as(100), req("interactive"), out)
 	waitQueued(t, e.hub, 2)
 	gate <- struct{}{}
 	if got := prompt(nextStarted(t, w)); got != "interactive" {
@@ -519,14 +519,12 @@ func TestCancelWhileQueued(t *testing.T) {
 	w := workertest.New(t, workertest.DefaultInfo())
 	gate := make(chan struct{})
 	w.SetTranscribe(gated(gate))
-	e := start(t, hub.Config{}, nil, 1, w)
+	e := start(t, hub.Config{PreemptTimeout: -1}, nil, 1, w)
 	out := make(chan outcome, 3)
 	async(e.hub, context.Background(), req("holder"), out)
 	nextStarted(t, w)
-	ctx, cancel := context.WithCancel(context.Background())
-	c := req("canceled")
-	c.Priority = core.PriorityInteractive
-	async(e.hub, ctx, c, out)
+	ctx, cancel := context.WithCancel(as(100))
+	async(e.hub, ctx, req("canceled"), out)
 	waitQueued(t, e.hub, 1)
 	async(e.hub, context.Background(), req("next"), out)
 	waitQueued(t, e.hub, 2)
@@ -560,25 +558,19 @@ func TestQueueOverflow(t *testing.T) {
 	w := workertest.New(t, workertest.DefaultInfo())
 	gate := make(chan struct{})
 	w.SetTranscribe(gated(gate))
-	e := start(t, hub.Config{QueueLength: 2}, nil, 1, w)
+	e := start(t, hub.Config{QueueLength: 2, PreemptTimeout: -1}, nil, 1, w)
 	out := make(chan outcome, 8)
 	async(e.hub, context.Background(), req("holder"), out)
 	nextStarted(t, w)
 	for i, n := range []string{"b1", "b2"} {
-		r := req(n)
-		r.Priority = core.PriorityBatch
-		async(e.hub, context.Background(), r, out)
+		async(e.hub, as(0), req(n), out)
 		waitQueued(t, e.hub, i+1)
 	}
-	b3 := req("b3")
-	b3.Priority = core.PriorityBatch
-	_, err := e.hub.Transcribe(context.Background(), b3, nil)
+	_, err := e.hub.Transcribe(as(0), req("b3"), nil)
 	wantKind(t, err, core.KindUnavailable)
 
 	// Higher priority evicts the newest lower priority job instead.
-	i1 := req("i1")
-	i1.Priority = core.PriorityInteractive
-	async(e.hub, context.Background(), i1, out)
+	async(e.hub, as(100), req("i1"), out)
 	o := <-out
 	if o.name != "b2" {
 		t.Fatalf("evicted %s, want b2", o.name)
@@ -616,19 +608,19 @@ func TestNoHeadOfLineBlockingAcrossModels(t *testing.T) {
 	wb := workertest.New(t, workertest.Info{Engine: "e", Models: []workertest.ModelInfo{{ID: "b", Default: true}}})
 	gate := make(chan struct{})
 	wa.SetTranscribe(gated(gate))
-	e := start(t, hub.Config{}, nil, 1, wa, wb)
+	e := start(t, hub.Config{PreemptTimeout: -1}, nil, 1, wa, wb)
 	out := make(chan outcome, 3)
 	a1 := req("a1")
 	a1.Model = "a"
 	async(e.hub, context.Background(), a1, out)
 	nextStarted(t, wa)
 	a2 := req("a2")
-	a2.Model, a2.Priority = "a", core.PriorityInteractive
-	async(e.hub, context.Background(), a2, out)
+	a2.Model = "a"
+	async(e.hub, as(100), a2, out)
 	waitQueued(t, e.hub, 1)
 	b := req("b")
-	b.Model, b.Priority = "b", core.PriorityBatch
-	if _, err := e.hub.Transcribe(context.Background(), b, nil); err != nil {
+	b.Model = "b"
+	if _, err := e.hub.Transcribe(as(0), b, nil); err != nil {
 		t.Fatalf("job for an idle worker was blocked: %v", err)
 	}
 	close(gate)

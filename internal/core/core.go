@@ -35,17 +35,6 @@ const (
 	TaskTranslate  Task = "translate"
 )
 
-// Priority orders jobs waiting for the same engine worker.
-type Priority int
-
-// Priorities, lowest first. Wyoming voice commands are interactive: a two
-// second utterance must not wait behind an hour-long file.
-const (
-	PriorityBatch Priority = iota
-	PriorityNormal
-	PriorityInteractive
-)
-
 // Protocol names used in Request.Protocol, logs and usage records.
 const (
 	ProtocolLegacy  = "legacy"
@@ -73,8 +62,9 @@ type Request struct {
 	// worker also render the transcript exactly as the reference
 	// whisper-asr-webservice would for its engine; see Result.Rendered.
 	LegacyOutput string
-	Priority     Priority
-	Protocol     string
+	// Protocol is one of the Protocol constants. With the caller's identity
+	// it decides the job's priority; clients cannot choose one.
+	Protocol string
 	// Endpoint is the client-facing operation, e.g. "/asr" or
 	// "/v1/audio/transcriptions"; it only feeds logs and usage records.
 	Endpoint string
@@ -123,7 +113,6 @@ type Result struct {
 type DetectRequest struct {
 	Audio    PCM
 	Model    string
-	Priority Priority
 	Protocol string
 	Endpoint string
 }
@@ -158,8 +147,9 @@ type Model struct {
 
 // Service is the single entry point protocol frontends use to run speech
 // recognition. Implementations resolve aliases, enforce per-user model
-// access using the Identity in ctx, queue by priority and record usage, so
-// frontends must not repeat any of that.
+// access using the Identity in ctx, schedule by the priority that identity
+// and Request.Protocol resolve to, and record usage, so frontends must not
+// repeat any of that.
 type Service interface {
 	// Transcribe runs req and returns the complete result. When onSegment
 	// is not nil it is called for each segment as soon as the engine

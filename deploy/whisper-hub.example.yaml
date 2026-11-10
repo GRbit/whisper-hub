@@ -56,10 +56,26 @@ hub:
   # Unknown model names: "default" falls back to the default model (many
   # OpenAI clients hardcode names), "error" answers model_not_found.
   unknown_model: default
-  # Jobs waiting for a worker, across all workers; more get "busy". They
-  # start by priority, then arrival: a constant stream of higher-priority
-  # (Wyoming) jobs keeps lower ones waiting.
+  # New jobs waiting for a worker, across all workers; more get "busy".
+  # Jobs that already ran (paused, or waiting to restart) do not count.
   queue_length: 100
+  # Job priorities: higher runs first, equal ones in arrival order, and a
+  # higher job interrupts a running lower one (see preempt_timeout). A
+  # constant stream of higher jobs keeps lower ones waiting. A users file
+  # entry's "priority" wins over these protocol defaults; admin, when set,
+  # is the priority of access without credentials (authentication off, or
+  # http.open_listen). Clients cannot choose a priority.
+  priorities:
+    legacy: 50
+    openai: 50
+    wyoming: 100
+    admin: null
+  # How long a running lower-priority job gets to pause for a higher one.
+  # A paused job continues later where it stopped. One that does not pause
+  # in time is canceled and restarts from the beginning later, unless it
+  # already streamed output to its client or was restarted once: then the
+  # higher job waits for it. Negative: never interrupt a running job.
+  preempt_timeout: 5s
   poll_interval: 15s # re-probe of a healthy worker
   retry_min: 1s # backoff bounds while a worker is down or loading
   retry_max: 30s

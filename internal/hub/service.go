@@ -28,7 +28,7 @@ func (h *Hub) Transcribe(ctx context.Context, req *core.Request, onSegment func(
 	}
 	h.log.Debug("transcribe request", "user", ev.User, "protocol", req.Protocol, "endpoint", req.Endpoint,
 		"model", req.Model, "task", task, "language", req.Language, "audio_s", ev.AudioSeconds,
-		"priority", req.Priority, "vad", req.VADFilter, "words", req.WordTimestamps, "diarize", req.Diarize,
+		"priority", h.priorityOf(ctx, req.Protocol), "vad", req.VADFilter, "words", req.WordTimestamps, "diarize", req.Diarize,
 		"legacy_output", req.LegacyOutput)
 	res, err := h.transcribe(ctx, req, onSegment, &ev)
 	h.finish(ctx, &ev, start, err)
@@ -48,17 +48,29 @@ func (h *Hub) transcribe(ctx context.Context, req *core.Request, onSegment func(
 		return nil, err
 	}
 	ev.Task = opts.Task
-	w, queued, err := h.acquire(ctx, view.id, req.Priority)
-	ev.Queued = queued
-	if err != nil {
-		return nil, err
+	j := &job{ctx: ctx, model: view.id, prio: h.priorityOf(ctx, req.Protocol), pausable: true}
+	seg := onSegment
+	if onSegment != nil {
+		seg = func(s core.Segment) error {
+			if !h.delivering(j) {
+				return core.WrapError(core.KindCanceled, errRestart, "job canceled for a restart")
+			}
+			return onSegment(s)
+		}
 	}
-	defer h.release(w)
-	res, err := w.client.Transcribe(ctx, opts, req.Audio, onSegment, nil)
-	if err != nil {
-		if core.KindOf(err) == core.KindUnavailable {
+	var res *core.Result
+	err = h.schedule(j, func(actx context.Context, w *worker, id string, onPause func(bool)) error {
+		o := opts
+		o.JobID = id
+		var err error
+		res, err = w.client.Transcribe(actx, o, req.Audio, seg, onPause)
+		if err != nil && core.KindOf(err) == core.KindUnavailable {
 			w.kickProbe()
 		}
+		return err
+	})
+	ev.Queued = h.queuedOf(j)
+	if err != nil {
 		return nil, err
 	}
 	if res.Model == "" {
@@ -171,7 +183,7 @@ func (h *Hub) DetectLanguage(ctx context.Context, req *core.DetectRequest) (*cor
 		Model: req.Model, AudioSeconds: audio.Seconds(),
 	}
 	h.log.Debug("detect-language request", "user", ev.User, "protocol", req.Protocol, "endpoint", req.Endpoint,
-		"model", req.Model, "audio_s", req.Audio.Seconds(), "priority", req.Priority)
+		"model", req.Model, "audio_s", req.Audio.Seconds(), "priority", h.priorityOf(ctx, req.Protocol))
 	det, err := h.detect(ctx, req, audio, &ev)
 	h.finish(ctx, &ev, start, err)
 	return det, err
@@ -188,17 +200,18 @@ func (h *Hub) detect(ctx context.Context, req *core.DetectRequest, audio core.PC
 		return nil, err
 	}
 	ev.Model, ev.Engine = view.id, view.engine
-	w, queued, err := h.acquire(ctx, view.id, req.Priority)
-	ev.Queued = queued
-	if err != nil {
-		return nil, err
-	}
-	defer h.release(w)
-	det, err := w.client.DetectLanguage(ctx, view.id, audio)
-	if err != nil {
-		if core.KindOf(err) == core.KindUnavailable {
+	j := &job{ctx: ctx, model: view.id, prio: h.priorityOf(ctx, req.Protocol)}
+	var det *core.Detection
+	err = h.schedule(j, func(actx context.Context, w *worker, _ string, _ func(bool)) error {
+		var err error
+		det, err = w.client.DetectLanguage(actx, view.id, audio)
+		if err != nil && core.KindOf(err) == core.KindUnavailable {
 			w.kickProbe()
 		}
+		return err
+	})
+	ev.Queued = h.queuedOf(j)
+	if err != nil {
 		return nil, err
 	}
 	if det.Model == "" {
@@ -208,6 +221,13 @@ func (h *Hub) detect(ctx context.Context, req *core.DetectRequest, audio core.PC
 		det.Engine = view.engine
 	}
 	return det, nil
+}
+
+// queuedOf is the time j spent waiting for a slot or paused.
+func (h *Hub) queuedOf(j *job) time.Duration {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return j.queued
 }
 
 // finish records usage and writes the one info line per job.

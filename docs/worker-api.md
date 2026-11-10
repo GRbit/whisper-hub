@@ -268,7 +268,8 @@ Errors, before anything else is sent:
 | 400 | `bad_request` | the body is not a JSON object with a non-empty `job_id` string, or `model` is not a string or null |
 | 409 | `not_pausable` | the engine cannot pause at all, or `model` is not loaded and could only be loaded by unloading the paused job's model (`WHISPER_HUB_ENGINE_MAX_LOADED_MODELS`) |
 
-Only transcriptions pause; `POST /v1/detect-language` has no pause point.
+The gateway treats `409` like a pause that did not take effect in time. Only
+transcriptions pause; `POST /v1/detect-language` has no pause point.
 
 ### Pausing
 
@@ -280,7 +281,7 @@ starts, so a job can always pause before doing any work, and then:
 |---|---|---|
 | `faster_whisper` | between segments | the segment generator keeps its decoding state to itself; another call on the same `WhisperModel` runs in between |
 | `openai_whisper` | between 30-second windows, and once after decoding | the decoder's key-value cache hooks are installed and removed within each window |
-| `whisperx` | between its transcribe, align and diarize stages | the pipeline's tokenizer and options belong to the call in progress during transcribe and are reset when it returns; there is no pause point inside it, so on a long file a pause usually takes effect only after most of the work |
+| `whisperx` | between its transcribe, align and diarize stages | the pipeline's tokenizer and options belong to the call in progress during transcribe and are reset when it returns; there is no pause point inside it, so on a long file a pause usually takes effect only after most of the work, and the gateway's timeout path (cancel and restart) applies instead |
 | `fake` | before each segment, unless the prompt has the directive `pause=ignore` | |
 
 Checked per engine with model `tiny` on the CPU images, using
@@ -372,6 +373,7 @@ how a worker must behave to be considered healthy:
 | `hub.poll_interval` | 15s | how often a healthy worker is probed again |
 | `hub.retry_min`, `hub.retry_max` | 1s, 30s | bounds of the exponential backoff between probes of a worker that is down or still loading |
 | `hub.fail_threshold` | 2 | consecutive failed probes before a healthy worker is taken out of rotation |
+| `hub.preempt_timeout` | 5s | from opening `POST /v1/pause` until the job's stream reports `paused`; after it the gateway cancels the job to restart it later |
 
 A probe is `/healthz` followed by `/v1/info`. There is deliberately no
 overall deadline for a transcription: a long recording can take an hour.

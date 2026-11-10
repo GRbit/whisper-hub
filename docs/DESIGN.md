@@ -31,8 +31,8 @@ Non-goals:
 - Parity with OpenAI's `gpt-*` transcription models (diarized output, log
   probabilities, server-side chunking) and the OpenAI Realtime API.
 - Decoding or resampling audio in the workers.
-- Preempting a running job, a persistent job queue, or sharing state between
-  several gateway processes.
+- A persistent job queue, or sharing state between several gateway
+  processes.
 - Platforms other than linux/amd64 containers.
 
 ## Terms
@@ -127,7 +127,10 @@ following, and must not repeat any of it:
   `admin`).
 - `Request.Model` is passed exactly as the client sent it. The service
   resolves aliases, applies the unknown-model policy and enforces access.
-- The service queues the job by `Request.Priority` and records usage, for
+- The service schedules the job by the priority it resolves from the
+  identity and `Request.Protocol` (see
+  [Scheduling and priorities](#scheduling-and-priorities)), may pause or
+  restart it to let a higher job run, and records usage once per call, for
   failed jobs too.
 - `onSegment`, when given, is called for each segment as soon as the engine
   produces it. An error returned from it cancels the job.
@@ -188,8 +191,10 @@ what the gateway needs:
 - The transcript comes back as a stream of JSON lines, one per segment as
   the engine produces it, so that streaming clients get text early and the
   gateway can tell a working engine from a stuck one.
-- The gateway cancels a job by closing the connection. No job ids or cancel
-  calls are needed.
+- The gateway cancels a job by closing the connection. No cancel call is
+  needed. Pausing works the same way: the gateway names the job by an id it
+  chose (`job_id`) in `POST /v1/pause` and keeps that request open for as
+  long as the pause should last; the job's own stream says when it paused.
 - A worker describes itself (`GET /v1/info`: engine, models, optional
   features), so the gateway needs no per-worker configuration beyond a URL.
 - The API is unauthenticated and unversioned: gateway and worker are
@@ -210,8 +215,8 @@ request is read and how the result is written.
    streamed straight into the decoder: with `encode=true` (the default) into
    ffmpeg, with `encode=false` it is taken as raw PCM at
    `legacy.raw_sample_rate`.
-3. It calls `Transcribe` with `LegacyOutput` set to the `output` parameter,
-   priority normal and no segment callback.
+3. It calls `Transcribe` with `LegacyOutput` set to the `output` parameter
+   and no segment callback.
 4. The hub resolves the model, checks access, drops options the engine does
    not support (upstream ignores them silently), queues the job and sends it
    to a worker with `legacy_output` set.
@@ -232,7 +237,7 @@ is built in the frontend. `/`, `/docs`, `/redoc`, `/openapi.json` and
 2. `internal/openaiapi` reads the multipart form field by field, validates
    each field on arrival with OpenAI's error codes, and streams the `file`
    part into ffmpeg.
-3. It calls `Transcribe` with priority normal. Word timestamps are requested
+3. It calls `Transcribe`. Word timestamps are requested
    from the engine only when the response can carry them (`verbose_json`
    with `timestamp_granularities` containing `word`).
 4. The response is rendered in Go from the engine-neutral segments: `json`,
@@ -258,9 +263,9 @@ is built in the frontend. `/`, `/docs`, `/redoc`, `/openapi.json` and
    buffered up to `wyoming.max_utterance_bytes` and
    `wyoming.max_utterance_duration`.
 4. At `audio-stop` the buffered audio is converted with
-   `AudioDecoder.FromRaw` and passed to `Transcribe` with priority
-   interactive. The requested language is mapped to a Whisper code the model
-   supports (`zh-HK` to `yue`, `pt-BR` to `pt`); anything unusable means
+   `AudioDecoder.FromRaw` and passed to `Transcribe` (protocol `wyoming`,
+   priority 100 by default). The requested language is mapped to a Whisper
+   code the model supports (`zh-HK` to `yue`, `pt-BR` to `pt`); anything unusable means
    automatic detection.
 5. The answer is a `transcript` event. With `wyoming.stream_transcripts` it
    is wrapped in `transcript-start`, `transcript-chunk` and
@@ -423,23 +428,89 @@ The field lists and the operator's view are in the
 Each worker runs at most `max_in_flight` jobs (default 1). Jobs that cannot
 start wait in one queue for the whole hub, bounded by `hub.queue_length`.
 
-- Whenever a slot frees up or a worker appears, waiting jobs are considered
-  by priority, highest first, then by arrival. Each goes to the
-  least loaded healthy worker that serves its model and has a free slot;
-  equally loaded workers take turns.
-- A job whose model has no free worker does not block jobs for other models.
-- There are three priorities: batch, normal and interactive. Legacy and
-  OpenAI requests are normal; Wyoming requests are interactive, so a
-  two-second voice command waits only for the job already running, not
-  behind an hour-long file. No frontend submits batch jobs.
-- Waiting does not raise a job's priority, so a constant stream of
-  higher-priority jobs keeps lower ones waiting.
-- Running jobs are never preempted.
-- When the queue is full, a new job pushes out the newest waiting job of
-  strictly lower priority, which fails as `unavailable`. If there
-  is none, the new job itself fails as `unavailable`.
+- A priority is a number; higher runs first, equal ones in arrival order.
+  There is no aging and no other ordering concept: a higher priority always
+  matters more than a lower one, so a constant stream of higher-priority
+  jobs keeps lower ones waiting.
+- The hub resolves a job's priority from the caller and the protocol: the
+  identity's own priority (a users file entry's `priority`, carried in
+  `core.Identity.Priority`; for admin access `hub.priorities.admin`) wins,
+  otherwise `hub.priorities.<protocol>` applies (legacy 50, openai 50,
+  wyoming 100). Frontends pass only `Request.Protocol`; no request field
+  sets a priority, so a client cannot choose one.
+- Whenever a slot frees up, a job pauses, or a worker appears, waiting and
+  paused jobs are considered by priority, then by arrival. A waiting job
+  goes to the least loaded healthy worker that serves its model and has a
+  free slot; equally loaded workers take turns. A job whose model has no
+  free worker does not block jobs for other models.
+- When the queue is full, a new job pushes out the newest waiting new job
+  of strictly lower priority, which fails as `unavailable`. If there is
+  none, the new job itself fails as `unavailable`. Jobs that already ran
+  (paused, or waiting to restart) are not counted and never pushed out:
+  they were admitted, and the hub itself interrupted them.
 - A waiting job whose model loses its last healthy worker fails at once
   instead of waiting for an unknown time.
+
+### Preemption
+
+When a job cannot start because every slot it could use is taken, and one
+of those slots runs a job of strictly lower priority, the lowest of them
+(the newest among equals) is asked to pause. One waiting job asks one
+running job at a time.
+
+The state of a job: it waits in the queue, runs on a slot, and may be
+paused, in which case it holds no slot but stays bound to its worker,
+where its engine state lives, and competes for a slot there like a waiting
+job (priority, then arrival); getting one resumes it. A job that does not
+pause within `hub.preempt_timeout` (default 5s) is canceled and goes back
+to the queue, keeping its arrival order, to start again from the beginning
+on any worker. A negative `hub.preempt_timeout` disables interruption.
+
+- **The pause and its acknowledgment** go through the worker API: the hub
+  holds `POST /v1/pause` open for the job's worker job id while the pause
+  should last, and the job's own transcribe stream reports `paused` once
+  the engine stopped at a pause point (`ctx.check_cancelled()`), which is
+  what ends the timeout. Closing the pause request resumes the job. A worker
+  that refuses the pause (409) is treated like a timeout, without the wait.
+  See [worker-api.md](worker-api.md#post-v1pause).
+- **Partial output.** A job whose caller already received a segment (OpenAI
+  streaming, Wyoming `stream_transcripts`) is never canceled for a restart:
+  the caller would see the text twice. It may pause; when it does not, the
+  higher job waits for it. A segment that arrives after the hub decided to
+  cancel a job is not delivered, so the decision and delivery cannot race.
+  Legacy and non-streaming requests never deliver partial output, so a
+  restart is invisible to them except in timing; their responses are those
+  of an uninterrupted run.
+- **Bounded restarts.** A job is canceled for a restart at most once.
+  Afterwards it is protected like a job that delivered output. Without the
+  bound a low job on an engine that pauses rarely (whisperx) would be
+  restarted by every voice command and might never finish; with it, the
+  work thrown away is at most one partial run per job. The price is that
+  a later higher job may have to wait for that second run.
+- **Language detection** has no pause point. It is not asked to pause; the
+  timeout applies directly (it is short anyway) and it restarts like any
+  other job.
+- **Accounting.** One usage record per request whatever happened inside.
+  `queued_ms` is all the time the job held no slot: waiting to start,
+  paused, waiting to restart; `elapsed_ms` is the whole request, so
+  `elapsed_ms - queued_ms` is the time on a worker, discarded runs included.
+- **Logging.** Asking to pause, paused, resumed, withdrawn, canceled for
+  restart and restarting are queueing decisions and go to Debug; the one
+  Info line per job stays the usage recorder's.
+- **Outcomes at the edges.** A paused job whose client disconnects ends
+  as `canceled`; closing its transcribe stream cancels it in the worker and
+  its pause request ends. A job waiting to restart whose client disconnects
+  leaves the queue like any waiting job. When the worker fails during a
+  pause, the paused job fails like a running one (`unavailable`): its state
+  was in that process. During graceful shutdown requests keep their slots,
+  so a paused job resumes once the job that paused it ends and finishes
+  within `http.shutdown_grace`; what is still paused when the grace period
+  ends is cut off like a running job.
+
+Pause points per engine, and what was checked, are in
+[worker-api.md](worker-api.md#pausing). A canceled job keeps the engine
+busy until its next pause point, since cancellation is checked at the same
+places; the job that preempted it waits for that in the worker.
 
 Worker health is tracked by probing: `GET /healthz`, then `GET /v1/info`.
 A healthy worker is probed every `hub.poll_interval`. One that is down or
@@ -661,9 +732,16 @@ How this shows in the code:
 - **No job deadline.** Only the wait for the first line of a worker's
   response is bounded (`hub.first_byte_timeout`). A stuck engine holds its
   worker slot until the client gives up.
-- **No preemption.** An interactive job waits for the running job to finish.
-  With one worker and hour-long files that wait can be long; a separate
-  worker for interactive use is the remedy.
+- **Preemption is as good as the engine's pause points.** faster_whisper
+  pauses within a segment's time, openai_whisper within a 30-second window,
+  whisperx only between stages, so on a long file it is usually canceled and
+  restarted, and a canceled job still holds the engine until its next pause
+  point. A restarted job is not interrupted again, and a streaming job that
+  sent text is never restarted, so a voice command can still wait for a
+  whole file there. A separate worker for interactive use avoids all of it.
+- **A paused job keeps its memory.** Its audio and engine state stay in the
+  worker, and it can only continue on that worker. A worker that would have
+  to unload the paused job's model to run the other one refuses the pause.
 - **State is per gateway process.** Usage totals, the rate limiter and the
   queue are not shared, so running several gateways side by side splits
   them.

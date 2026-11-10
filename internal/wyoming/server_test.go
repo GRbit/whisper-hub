@@ -95,7 +95,7 @@ func TestTranscribeRoundTrip(t *testing.T) {
 		t.Fatalf("calls: %d", len(calls))
 	}
 	req := calls[0].req
-	if req.Model != "small" || req.Language != "en" || req.Priority != core.PriorityInteractive ||
+	if req.Model != "small" || req.Language != "en" ||
 		req.Protocol != core.ProtocolWyoming || req.Task != core.TaskTranscribe {
 		t.Errorf("request %+v", req)
 	}

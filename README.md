@@ -16,8 +16,9 @@ once, in front of [Whisper](https://github.com/openai/whisper) models:
   10300.
 
 Built in: authentication (HTTP Basic and API keys), per-user model access,
-usage accounting (how much audio each user had transcribed), and a priority
-queue, so that a voice command does not wait behind an hour-long file.
+usage accounting (how much audio each user had transcribed), and
+configurable priorities with preemption, so that a voice command does not
+wait behind an hour-long file that is already being transcribed.
 
 ```
 clients --> gateway (Go)                          --> engine worker(s) (Python)
@@ -275,12 +276,68 @@ them under their ids (for example `base`, `large-v3`), plus aliases.
 Several workers may serve the same model; jobs are spread between them.
 Each worker gets at most `max_in_flight` jobs at once (default 1). The rest
 wait in one queue (`hub.queue_length`, default 100), ordered by priority and
-by arrival within a priority. Wyoming requests have interactive priority,
-legacy and OpenAI requests normal priority: a voice command waits only for
-the job already running. Waiting does not raise a job's priority, so a
-constant stream of higher-priority jobs keeps lower ones waiting. When the
-queue is full, a new job pushes out the newest waiting job of lower
-priority, or is itself refused as busy (503 over HTTP).
+by arrival within a priority. When the queue is full, a new job pushes out
+the newest waiting new job of lower priority, or is itself refused as busy
+(503 over HTTP).
+
+### Priorities and preemption
+
+A priority is a number: higher runs first, equal priorities run in arrival
+order. Waiting does not raise a job's priority, so a constant stream of
+higher-priority jobs keeps lower ones waiting. A job's priority is, in this
+order:
+
+1. the `priority` of the caller's users file entry, if it has one (Wyoming
+   connections act as the user `wyoming`, so an entry of that name sets
+   theirs);
+2. for access without credentials (authentication off, or the
+   `http.open_listen` admin port), `hub.priorities.admin`, if set;
+3. the default of the protocol: `hub.priorities.legacy` (50),
+   `hub.priorities.openai` (50) or `hub.priorities.wyoming` (100).
+
+Clients cannot choose a priority in a request.
+
+```yaml
+hub:
+  priorities:
+    legacy: 50
+    openai: 50
+    wyoming: 100
+    admin: 70          # optional; unset means the protocol default
+  preempt_timeout: 5s
+```
+
+A running job is interrupted when a job of strictly higher priority cannot
+start because every worker slot it could use is taken: the lowest-priority
+running job on those slots is asked to pause. While it is paused the higher
+job runs on its model; afterwards the paused job continues where it stopped
+and its result is the same as without the pause. If it has not paused within
+`hub.preempt_timeout` (default 5s), it is canceled, the higher job runs, and
+the canceled job is queued again and starts from the beginning; its client
+still gets its answer on the same request, only later. A negative
+`hub.preempt_timeout` turns interruption off.
+
+What this means for clients:
+
+- Legacy and non-streaming OpenAI requests see only a delay. The response
+  is the same as without the interruption, also after a restart.
+- A streaming response (OpenAI `stream=true`, Wyoming
+  `wyoming.stream_transcripts`) that has already sent text is never
+  restarted, because the client would see that text twice. It may be
+  paused, which shows as a gap between deltas; if it does not pause, the
+  higher job waits for it to finish.
+- A job is restarted at most once. After a restart it is treated like a
+  streaming job that has sent text: it may be paused, but not canceled
+  again, so a series of higher jobs cannot keep throwing its work away.
+- The usage record is one per request. `queued_ms` counts all the time the
+  job did not run: waiting to start, paused, and waiting to restart.
+  `elapsed_ms` is the whole request, a canceled run included.
+
+How fast a job pauses depends on the engine: faster_whisper pauses between
+segments, openai_whisper between 30-second windows, whisperx only between
+its transcribe, align and diarize stages, which on a long file usually
+means the timeout path. A job that is canceled keeps the engine busy until
+it reaches the next such point, and the higher job waits that long.
 
 ## Using the protocols
 
@@ -365,7 +422,8 @@ entry makes whisper-hub refuse every Wyoming connection:
 ```
 
 Without such an entry Wyoming may use every model. A refused connection
-gets a Wyoming `error` event.
+gets a Wyoming `error` event. The entry's `priority`, if any, replaces
+`hub.priorities.wyoming` (default 100) for Wyoming jobs.
 
 ### Health
 
@@ -401,8 +459,10 @@ users:
     password_hash: "$2a$12$..."    # from: whisper-hub hash
     api_keys: ["sha256:..."]       # from: whisper-hub apikey
     models: ["small", "large-*"]   # allowed besides the default model
+    priority: 60                   # optional, instead of the protocol default
   - name: wyoming                  # optional: restricts Wyoming connections
     models: ["small"]
+    priority: 100                  # optional, the priority of Wyoming jobs
   - name: admin
     api_keys: ["sha256:..."]
     admin: true                    # may read /_hub/usage
@@ -417,7 +477,9 @@ docker compose -f deploy/docker-compose.yml exec whisper whisper-hub apikey   # 
 ```
 
 Give the key (it starts with `wh_`) to the user and put the hash into the
-file. A user entry may also have `disabled: true`.
+file. A user entry may also have `disabled: true`, and a `priority` (any
+integer) that replaces the protocol default for that user's jobs, see
+[Priorities and preemption](#priorities-and-preemption).
 
 How it behaves:
 
@@ -486,7 +548,9 @@ time=2026-11-10T12:00:09.120Z level=INFO msg="job finished" user=alice protocol=
 
 `status` is `ok` or the kind of failure (`forbidden`, `unavailable`,
 `canceled`, ...); a failed job also has an `error` field. `queued_ms` is the
-time spent waiting for a worker, `elapsed_ms` the total time including it.
+time spent waiting for a worker (paused and waiting to restart included, see
+[Priorities and preemption](#priorities-and-preemption)), `elapsed_ms` the
+total time including it.
 With `log.format: json` the line is a JSON object.
 
 **The request log file** has the same fields per job as JSON: `ts`, `user`,

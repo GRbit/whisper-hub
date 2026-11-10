@@ -112,7 +112,6 @@ func (s *Server) handleAudio(w http.ResponseWriter, r *http.Request, task core.T
 		Temperature: p.temperature,
 		// Only verbose_json can carry words; asking otherwise costs latency.
 		WordTimestamps: p.granWord && p.format == formatVerboseJSON && task == core.TaskTranscribe,
-		Priority:       core.PriorityNormal,
 		Protocol:       core.ProtocolOpenAI,
 		Endpoint:       endpoint,
 	}

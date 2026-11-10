@@ -183,7 +183,7 @@ func TestJSONDefault(t *testing.T) {
 		t.Fatalf("got %s want %s", w.Body, want)
 	}
 	r := svc.req
-	if r.Model != "whisper-1" || r.Task != core.TaskTranscribe || r.Priority != core.PriorityNormal ||
+	if r.Model != "whisper-1" || r.Task != core.TaskTranscribe ||
 		r.Protocol != core.ProtocolOpenAI || r.Endpoint != pathTranscriptions || r.WordTimestamps ||
 		r.Temperature != nil || r.Language != "" || len(r.Audio) != core.SampleRate*4 {
 		t.Fatalf("unexpected request %+v", r)

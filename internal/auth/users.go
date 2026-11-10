@@ -32,9 +32,12 @@ type account struct {
 	APIKeys []string `yaml:"api_keys,omitempty"`
 	// Models are the model id patterns this user may use besides the
 	// default model: exact ids or "*" globs.
-	Models   []string `yaml:"models,omitempty"`
-	Admin    bool     `yaml:"admin,omitempty"`
-	Disabled bool     `yaml:"disabled,omitempty"`
+	Models []string `yaml:"models,omitempty"`
+	// Priority, when set, replaces the protocol default of hub.priorities
+	// for this user's jobs: higher runs first and may interrupt lower.
+	Priority *int `yaml:"priority,omitempty"`
+	Admin    bool `yaml:"admin,omitempty"`
+	Disabled bool `yaml:"disabled,omitempty"`
 }
 
 type usersFile struct {
@@ -168,6 +171,7 @@ const usersTemplate = `# whisper-hub users.
 #     password_hash: "$2a$12$..."
 #     api_keys: ["sha256:..."]
 #     models: ["small", "large-*"]   # besides the default model; "*" = all
+#     priority: 80                   # instead of the protocol default (hub.priorities)
 #     admin: true                    # may read /_hub/usage
 #     disabled: false
 

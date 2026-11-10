@@ -34,8 +34,16 @@ type Config struct {
 	// default model, the default) or "error" (KindModelNotFound).
 	UnknownModel string `yaml:"unknown_model"`
 	// QueueLength caps the jobs waiting for a worker, across all workers.
-	// Default 100.
+	// Default 100. Jobs that already ran (paused, or waiting to restart)
+	// do not count.
 	QueueLength int `yaml:"queue_length"`
+	// Priorities are the job priorities per protocol; see Priorities.
+	Priorities Priorities `yaml:"priorities"`
+	// PreemptTimeout is how long a running job of lower priority gets to
+	// pause for a waiting one before it is canceled and queued again to
+	// restart from the beginning. Negative: running jobs are never
+	// interrupted. Default 5s.
+	PreemptTimeout time.Duration `yaml:"preempt_timeout"`
 	// PollInterval is how often a healthy worker is re-probed. Default 15s.
 	PollInterval time.Duration `yaml:"poll_interval"`
 	// RetryMin and RetryMax bound the exponential backoff for probing an
@@ -54,6 +62,29 @@ type Config struct {
 	// ProbeTimeout bounds one /healthz or /v1/info call. Default 30s.
 	ProbeTimeout time.Duration `yaml:"probe_timeout"`
 }
+
+// Priorities set job priorities: higher runs first, equal ones in arrival
+// order. A priority attached to the caller (a users file entry's priority,
+// or Admin for access without credentials) wins over the protocol default.
+type Priorities struct {
+	// Legacy is the default of /asr and /detect-language jobs. Default 50.
+	Legacy *int `yaml:"legacy"`
+	// OpenAI is the default of /v1/audio jobs. Default 50.
+	OpenAI *int `yaml:"openai"`
+	// Wyoming is the default of Wyoming jobs. Default 100.
+	Wyoming *int `yaml:"wyoming"`
+	// Admin, when set, is the priority of every job with admin access
+	// (authentication off, or the unauthenticated listener). Default: none,
+	// the protocol default applies.
+	Admin *int `yaml:"admin"`
+}
+
+// Default priorities.
+const (
+	DefaultPriorityLegacy  = 50
+	DefaultPriorityOpenAI  = 50
+	DefaultPriorityWyoming = 100
+)
 
 // WorkerConfig describes one engine worker.
 type WorkerConfig struct {
@@ -84,6 +115,16 @@ func (c Config) Resolved() Config {
 	if c.QueueLength <= 0 {
 		c.QueueLength = 100
 	}
+	c.Priorities.Legacy = orDefault(c.Priorities.Legacy, DefaultPriorityLegacy)
+	c.Priorities.OpenAI = orDefault(c.Priorities.OpenAI, DefaultPriorityOpenAI)
+	c.Priorities.Wyoming = orDefault(c.Priorities.Wyoming, DefaultPriorityWyoming)
+	if c.Priorities.Admin != nil {
+		a := *c.Priorities.Admin
+		c.Priorities.Admin = &a
+	}
+	if c.PreemptTimeout == 0 {
+		c.PreemptTimeout = 5 * time.Second
+	}
 	if c.PollInterval <= 0 {
 		c.PollInterval = 15 * time.Second
 	}
@@ -108,6 +149,15 @@ func (c Config) Resolved() Config {
 		}
 	}
 	return c
+}
+
+// orDefault returns a copy of p, or of def when p is nil, so a resolved
+// Config never shares a pointer with its caller.
+func orDefault(p *int, def int) *int {
+	if p != nil {
+		def = *p
+	}
+	return &def
 }
 
 func (c Config) withDefaults() (Config, error) {
@@ -169,9 +219,12 @@ type Hub struct {
 	mu      sync.Mutex
 	workers []*worker
 	known   map[string]bool // every model id ever served, for the unknown-model policy
-	pending []*job
+	pending []*job          // waiting for a slot
+	active  []*job          // running or paused on a worker
 	seq     uint64
 	rr      int
+	// idPrefix keeps worker job ids unique across gateway restarts.
+	idPrefix string
 
 	stop context.CancelFunc
 	wg   sync.WaitGroup
@@ -198,7 +251,9 @@ func New(cfg Config, authz core.Authorizer, usage core.UsageRecorder, log *slog.
 		}()
 	}
 	h.log.Info("hub started", "workers", len(h.workers), "default_model", cfg.DefaultModel,
-		"unknown_model", h.cfg.UnknownModel, "queue_length", h.cfg.QueueLength)
+		"unknown_model", h.cfg.UnknownModel, "queue_length", h.cfg.QueueLength,
+		"priority_legacy", *h.cfg.Priorities.Legacy, "priority_openai", *h.cfg.Priorities.OpenAI,
+		"priority_wyoming", *h.cfg.Priorities.Wyoming, "preempt_timeout", h.cfg.PreemptTimeout)
 	return h, nil
 }
 
@@ -210,7 +265,8 @@ func newHub(cfg Config, authz core.Authorizer, usage core.UsageRecorder, log *sl
 	if log == nil {
 		log = slog.Default()
 	}
-	h := &Hub{cfg: cfg, authz: authz, usage: usage, log: log, now: time.Now, known: map[string]bool{}, stop: func() {}}
+	h := &Hub{cfg: cfg, authz: authz, usage: usage, log: log, now: time.Now, known: map[string]bool{}, stop: func() {},
+		idPrefix: newIDPrefix()}
 	for _, wc := range cfg.Workers {
 		c, err := workerclient.New(wc.URL, workerclient.Config{
 			ConnectTimeout: cfg.ConnectTimeout, FirstByteTimeout: cfg.FirstByteTimeout, RequestTimeout: cfg.ProbeTimeout,

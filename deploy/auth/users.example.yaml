@@ -3,19 +3,22 @@
 #   whisper-hub apikey   -> a key to hand out once, and its sha256: hash for api_keys
 # Every user may use the default model; "models" grants more (exact ids or
 # "*" globs). "admin: true" may read GET /_hub/usage on the authenticated
-# listener.
+# listener. "priority" (any integer, higher runs first) replaces the
+# protocol default of hub.priorities for the user's jobs.
 users:
   - name: alice
     password_hash: "$2a$12$REPLACE.WITH.OUTPUT.OF.whisper-hub.hash........"
     models: ["small", "large-*"]
   - name: scripts
     api_keys: ["sha256:REPLACE_WITH_OUTPUT_OF_whisper-hub_apikey"]
+    priority: 10 # batch work: runs after everyone else, may be paused
   # Optional: every Wyoming connection (Home Assistant) acts as the user
   # "wyoming". Without this entry it may use every model; with it, its
   # models patterns apply and disabled: true refuses Wyoming. Give it no
   # credentials, and protect the Wyoming port by network.
   - name: wyoming
     models: ["small"]
+    priority: 100
   - name: admin
     api_keys: ["sha256:REPLACE_WITH_OUTPUT_OF_whisper-hub_apikey"]
     admin: true

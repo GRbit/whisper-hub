@@ -15,7 +15,8 @@ A self-hosted speech-to-text service. A Go gateway (`whisper-hub`, one static
 binary) serves three client protocols: the HTTP API of whisper-asr-webservice
 ("legacy"), OpenAI-compatible audio endpoints, and Wyoming for Home
 Assistant. It authenticates callers, enforces per-user model access, decodes
-audio with ffmpeg, queues jobs by priority and accounts usage. Python workers
+audio with ffmpeg, schedules jobs by priority (pausing or restarting a
+running lower one for a higher one) and accounts usage. Python workers
 (`worker/`) run the Whisper engines (faster_whisper, whisperx,
 openai_whisper, and a model-free `fake` for tests) behind an internal HTTP
 API.
@@ -62,8 +63,8 @@ They run real containers. The scripts are in `deploy/e2e/`.
 | Target | What it checks | What it needs besides Docker |
 |---|---|---|
 | `make e2e-clients` | the openai Python SDK, the `wyoming` package, a replay of Home Assistant's speech-to-text client and zeroconf discovery, against the gateway image with a canned Go fake worker | Go and ffmpeg on the host |
-| `make e2e-fake` | gateway image plus the Python fake worker: all three protocols, streaming, cancellation on disconnect, priority order (read from the request log), authentication on and off | ffmpeg and python3 on the host |
-| `make e2e-real` | the all-in-one image with model `tiny` on real recordings | `VOICE_FILES`; ffmpeg and python3 on the host; network access to download the model |
+| `make e2e-fake` | gateway image plus the Python fake worker: all three protocols, streaming, cancellation on disconnect, priority order and preemption (a Wyoming utterance pausing a long legacy job, and the timeout path with a fake that ignores the pause; read from the responses, the request log and the gateway log), authentication on and off | ffmpeg and python3 on the host |
+| `make e2e-real` | the all-in-one image with model `tiny` on real recordings, including a Wyoming utterance overtaking a long legacy job whose body must stay that of an uninterrupted run | `VOICE_FILES`; ffmpeg and python3 on the host; network access to download the model |
 | `make e2e-fidelity` | byte-for-byte comparison of legacy responses between the reference (built by `make image-reference`) and the all-in-one image, with whisper-hub's extensions applied explicitly | `VOICE_FILES`; network access to build the reference once; ffmpeg with AAC, MP3 and Opus encoders; python3 |
 | `make e2e-packages` | every Python package of the three single-engine images is installed in `whisper-hub:all` at the same version | the four images already built (`make image ENGINE=...`); python3 |
 | `make e2e` | `e2e-clients`, `e2e-fake`, `e2e-real`, `e2e-fidelity` | all of the above |
@@ -164,7 +165,9 @@ Worker (Python, `worker/`):
   (triton excepted: the version CUDA torch requires is used everywhere).
 - `tests/` - pytest suite, run in the `test` stage of `worker/Dockerfile`.
 - `scripts/fidelity.py` - compares a worker's rendered output with a running
-  upstream service on the same raw PCM.
+  upstream service on the same raw PCM. `scripts/pause_check.py` - checks on
+  a running worker that a paused and resumed job, and a job run during the
+  pause, give exactly the output of uninterrupted runs.
 
 Deployment:
 
@@ -192,7 +195,8 @@ Wyoming client -> wyoming server -> auth.WyomingIdentity
 
 core.Service (internal/hub):
   resolve model name -> Authorizer.AllowModel -> drop or refuse unsupported options
-  -> wait for a worker slot by priority -> workerclient: POST /v1/transcribe
+  -> wait for a worker slot by priority (identity, else protocol default),
+     pausing or canceling a lower running job -> workerclient: POST /v1/transcribe
   -> segments back through the onSegment callback -> Result
   -> UsageRecorder.Record (totals, request log, the Info log line)
 ```
@@ -304,7 +308,12 @@ Go client, the Go fake and `docs/worker-api.md` change together.
   `transcribe` and `detect_language`. In `transcribe`, call `ctx.info(...)`
   first, `ctx.segment(...)` per segment, `ctx.check_cancelled()` whenever
   the library returns control, and fill `Done.rendered` when
-  `opts.legacy_output` is set. Register the engine in `engines/__init__.py`
+  `opts.legacy_output` is set. `ctx.check_cancelled()` is also the pause
+  point: set `pausable = True` only after checking with
+  `worker/scripts/pause_check.py` that another job on the same loaded model
+  between two such calls leaves both outputs unchanged, and call it only
+  where no shared state of the model is half-changed (see the whisperx
+  options swap). Add the engine to the pause table in `docs/worker-api.md`. Register the engine in `engines/__init__.py`
   (`create` and `cuda_probe`) and in `ENGINES` in `config.py`. Add
   `worker/requirements/<name>.txt` (starting with `-r base.txt`) and the
   name to the `case` statements of the four engine Dockerfiles. On the
@@ -321,7 +330,9 @@ Go client, the Go fake and `docs/worker-api.md` change together.
   `core.IdentityFrom(r.Context())`; a non-HTTP one takes an identify
   function like `wyoming.IdentifyFunc` and stores the identity with
   `core.WithIdentity`. Pass `Request.Model` as received, set `Protocol` (add
-  a constant in `internal/core/core.go`), `Endpoint` and `Priority`, and map
+  a constant in `internal/core/core.go`, and a default to `hub.Priorities`
+  with its case in `priorityOf` in `internal/hub/sched.go`) and `Endpoint`;
+  frontends never set a priority. Map
   each `core.Error` kind to the protocol's own error. Add the `Config` to
   `config.Config`, construct and register the frontend in `newGateway` in
   `cmd/whisper-hub/gateway.go`, add its paths to the default

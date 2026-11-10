@@ -27,6 +27,10 @@ type Identity struct {
 	// Models holds the model id patterns this caller may use, as written
 	// in the users file. Interpreting them is the Authorizer's job.
 	Models []string
+	// Priority is the users file priority of this caller; nil when the
+	// entry has none. The Service falls back to its per-protocol default.
+	// Unused for NetworkAdmin, whose priority is the Service's own setting.
+	Priority *int
 }
 
 type identityKey struct{}
