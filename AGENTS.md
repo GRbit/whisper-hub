@@ -268,8 +268,11 @@ Go client, the Go fake and `docs/worker-api.md` change together.
 - **New config setting**: add the field, with a `yaml` tag and a doc comment
   that states the default, to the owning package's `Config` struct (or to
   `HTTP` or `Log` in `internal/config/config.go` for a setting of the binary
-  itself). Resolve the default inside the package, where the zero value is
-  interpreted. The environment variable appears by itself. Add the key with
+  itself). Resolve the default inside the package, in the `Resolved` method
+  of its `Config` that the constructor goes through; `whisper-hub config`
+  prints through the same method (`TestYAMLShowsResolvedDefaults` fails on
+  a setting that still prints as zero, unless its default really is zero).
+  The environment variable appears by itself. Add the key with
   its default to `deploy/whisper-hub.example.yaml`
   (`TestExampleConfigParses` fails on a key the code does not know), and to
   the README if users need it. If it replaces an upstream or sidecar

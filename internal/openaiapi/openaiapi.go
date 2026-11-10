@@ -41,9 +41,7 @@ type Server struct {
 
 // New returns a Server. A nil log uses slog.Default().
 func New(cfg Config, svc core.Service, dec core.AudioDecoder, log *slog.Logger) *Server {
-	if cfg.OwnedBy == "" {
-		cfg.OwnedBy = "whisper-hub"
-	}
+	cfg = cfg.Resolved()
 	if log == nil {
 		log = slog.Default()
 	}
@@ -54,6 +52,15 @@ func New(cfg Config, svc core.Service, dec core.AudioDecoder, log *slog.Logger) 
 		// clients that sort by it.
 		created: time.Now().Unix(),
 	}
+}
+
+// Resolved returns c with every zero value replaced by the default it
+// stands for, as New uses it.
+func (c Config) Resolved() Config {
+	if c.OwnedBy == "" {
+		c.OwnedBy = "whisper-hub"
+	}
+	return c
 }
 
 // Register adds the OpenAI routes to mux.

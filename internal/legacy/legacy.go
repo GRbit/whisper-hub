@@ -47,10 +47,16 @@ type Server struct {
 // New returns a legacy frontend using svc for recognition and dec for
 // turning uploads into PCM.
 func New(cfg Config, svc core.Service, dec core.AudioDecoder) *Server {
-	if cfg.RawSampleRate <= 0 {
-		cfg.RawSampleRate = core.SampleRate
+	return &Server{cfg: cfg.Resolved(), svc: svc, dec: dec, log: slog.Default().With("protocol", core.ProtocolLegacy)}
+}
+
+// Resolved returns c with every zero value replaced by the default it
+// stands for, as New uses it.
+func (c Config) Resolved() Config {
+	if c.RawSampleRate <= 0 {
+		c.RawSampleRate = core.SampleRate
 	}
-	return &Server{cfg: cfg, svc: svc, dec: dec, log: slog.Default().With("protocol", core.ProtocolLegacy)}
+	return c
 }
 
 // Register adds the legacy routes to mux.

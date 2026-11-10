@@ -82,7 +82,9 @@ const (
 	defaultMaxConnections       = 64
 )
 
-func (c Config) withDefaults() (Config, error) {
+// Resolved returns c with every zero value replaced by the default it
+// stands for, as New uses it. It does not validate; New does.
+func (c Config) Resolved() Config {
 	if c.Listen == "" {
 		c.Listen = defaultListen
 	}
@@ -103,6 +105,11 @@ func (c Config) withDefaults() (Config, error) {
 	durDefault(&c.IdleTimeout, defaultIdleTimeout)
 	durDefault(&c.WriteTimeout, defaultWriteTimeout)
 	durDefault(&c.ShutdownGrace, defaultShutdownGrace)
+	return c
+}
+
+func (c Config) withDefaults() (Config, error) {
+	c = c.Resolved()
 	if c.MaxHeaderBytes < 0 || c.MaxDataBytes < 0 || c.MaxPayloadBytes < 0 || c.MaxUtteranceBytes < 0 {
 		return c, fmt.Errorf("wyoming: byte limits must not be negative")
 	}

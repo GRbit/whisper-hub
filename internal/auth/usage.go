@@ -105,7 +105,7 @@ var _ core.UsageRecorder = (*recorder)(nil)
 // newRecorder opens the request log and restores the previous totals, so
 // counters survive a restart.
 func newRecorder(cfg UsageConfig) (*recorder, error) {
-	cfg = cfg.withDefaults()
+	cfg = cfg.resolved()
 	r := &recorder{cfg: cfg, totals: make(map[string]*UserTotals), now: time.Now}
 	if cfg.TotalsFile != "" {
 		if err := os.MkdirAll(filepath.Dir(cfg.TotalsFile), 0o755); err != nil {

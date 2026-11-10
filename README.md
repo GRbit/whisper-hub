@@ -248,7 +248,7 @@ the container: the worker inherits its environment.
 | `whisper-hub whisper-asr-webservice [flags]` | the same, under upstream's command name; the images also have a `whisper-asr-webservice` executable |
 | `whisper-hub hash` | asks for a password and prints its hash for the users file |
 | `whisper-hub apikey` | prints a new API key and its hash for the users file |
-| `whisper-hub config [flags]` | prints the configuration as merged from file, environment and flags. A zero or empty value means "the default from the example file" |
+| `whisper-hub config [flags]` | prints the effective configuration: file, environment and flags merged, with every unset setting shown as its default |
 | `whisper-hub healthcheck [flags]` | exits 0 when `/healthz` of the gateway in the same container answers 200; the images use it as their `HEALTHCHECK` |
 | `whisper-hub version` | prints the version |
 

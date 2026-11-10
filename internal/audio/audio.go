@@ -45,13 +45,22 @@ var _ core.AudioDecoder = (*Decoder)(nil)
 // New returns a decoder. A nil log uses slog.Default(). It does not check
 // for ffmpeg; call Check at startup for that.
 func New(cfg Config, log *slog.Logger) *Decoder {
-	if cfg.FFmpegPath == "" {
-		cfg.FFmpegPath = "ffmpeg"
-	}
 	if log == nil {
 		log = slog.Default()
 	}
-	return &Decoder{cfg: cfg, log: log}
+	return &Decoder{cfg: cfg.Resolved(), log: log}
+}
+
+// Resolved returns c with every zero value replaced by the default it
+// stands for, as New uses it.
+func (c Config) Resolved() Config {
+	if c.FFmpegPath == "" {
+		c.FFmpegPath = "ffmpeg"
+	}
+	if c.SpoolDir == "" {
+		c.SpoolDir = os.TempDir()
+	}
+	return c
 }
 
 // Check verifies that ffmpeg runs and the spool directory is writable.

@@ -46,7 +46,9 @@ const (
 	DefaultMaxLineBytes     = 64 << 20
 )
 
-func (c Config) withDefaults() Config {
+// Resolved returns c with every zero value replaced by the default it
+// stands for, as New uses it.
+func (c Config) Resolved() Config {
 	if c.ConnectTimeout <= 0 {
 		c.ConnectTimeout = DefaultConnectTimeout
 	}
@@ -80,7 +82,7 @@ func New(baseURL string, cfg Config, log *slog.Logger) (*Client, error) {
 	if log == nil {
 		log = slog.Default()
 	}
-	cfg = cfg.withDefaults()
+	cfg = cfg.Resolved()
 	dialer := &net.Dialer{Timeout: cfg.ConnectTimeout, KeepAlive: 30 * time.Second}
 	tr := &http.Transport{
 		Proxy:               nil, // internal traffic must never go through HTTP_PROXY

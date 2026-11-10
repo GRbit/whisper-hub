@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"gopkg.in/yaml.v3"
+
 	"github.com/GRbit/whisper-hub/internal/config"
 )
 
@@ -209,5 +211,150 @@ func TestExampleConfigParses(t *testing.T) {
 	again := load(t, []string{"--config", writeFile(t, string(out))}, envOf())
 	if again.Hub.QueueLength != cfg.Hub.QueueLength || again.HTTP.Listen != cfg.HTTP.Listen {
 		t.Fatalf("round trip: %+v", again)
+	}
+}
+
+// zeroByDefault lists the settings whose default really is zero, empty or
+// false. Any other setting that renders as zero for an empty configuration
+// is a default its package resolves but YAML does not show.
+var zeroByDefault = map[string]bool{
+	"http.open_listen":           true,
+	"audio.failed_uploads_dir":   true,
+	"hub.default_model":          true, // chosen at run time from the workers
+	"hub.aliases.whisper-1":      true, // "" is the default model
+	"auth.users_file":            true,
+	"auth.trust_forwarded":       true,
+	"auth.anonymous.restrict":    true,
+	"auth.anonymous.models":      true,
+	"auth.wyoming.user":          true,
+	"auth.wyoming.allow_cidrs":   true,
+	"auth.usage.totals_file":     true,
+	"auth.usage.log_file":        true,
+	"auth.usage.log_max_bytes":   true,
+	"legacy.max_upload_bytes":    true,
+	"openai.max_upload_bytes":    true,
+	"wyoming.version":            true, // filled in by the binary with its own version
+	"wyoming.stream_transcripts": true,
+	"wyoming.zeroconf.enabled":   true,
+	"wyoming.zeroconf.host":      true,
+	"worker.command":             true,
+	"worker.engine":              true,
+}
+
+// leaves flattens a decoded YAML document into "a.b.c" -> value.
+func leaves(prefix string, v any, out map[string]any) {
+	m, ok := v.(map[string]any)
+	if !ok {
+		out[prefix] = v
+		return
+	}
+	for k, sub := range m {
+		p := k
+		if prefix != "" {
+			p = prefix + "." + k
+		}
+		leaves(p, sub, out)
+	}
+}
+
+func renderedLeaves(t *testing.T, cfg config.Config) map[string]any {
+	t.Helper()
+	out, err := cfg.YAML()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc map[string]any
+	if err := yaml.Unmarshal(out, &doc); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	flat := map[string]any{}
+	leaves("", doc, flat)
+	return flat
+}
+
+func isZero(v any) bool {
+	switch x := v.(type) {
+	case nil:
+		return true
+	case string:
+		return x == "" || x == "0s"
+	case int:
+		return x == 0
+	case float64:
+		return x == 0
+	case bool:
+		return !x
+	case []any:
+		return len(x) == 0
+	case map[string]any:
+		return len(x) == 0
+	}
+	return false
+}
+
+// The config subcommand shows what the service runs with, so a default
+// resolved inside a package must not print as its zero value.
+func TestYAMLShowsResolvedDefaults(t *testing.T) {
+	flat := renderedLeaves(t, load(t, nil, envOf()))
+	var keys []string
+	for k := range flat {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+	for _, k := range keys {
+		if isZero(flat[k]) && !zeroByDefault[k] {
+			t.Errorf("%s renders as %v for an empty configuration", k, flat[k])
+		}
+	}
+	workers, _ := flat["hub.workers"].([]any)
+	if len(workers) != 1 || isZero(workers[0].(map[string]any)["max_in_flight"]) {
+		t.Errorf("hub.workers = %v, want max_in_flight resolved", flat["hub.workers"])
+	}
+	for k := range zeroByDefault {
+		if _, ok := flat[k]; !ok {
+			t.Errorf("zeroByDefault names %s, which is not a setting", k)
+		}
+	}
+}
+
+// Rendering resolves zero values only: what was set stays as set, and the
+// printed keys are exactly those of the example file.
+func TestYAMLKeepsSetValuesAndKeys(t *testing.T) {
+	flat := renderedLeaves(t, load(t, nil, envOf(
+		"WHISPER_HUB_HUB_QUEUE_LENGTH", "7",
+		"WHISPER_HUB_HUB_PRIORITY_AGING", "-1s",
+		"WHISPER_HUB_AUTH_RATE_LIMIT_FAILURES", "-1",
+		"WHISPER_HUB_WYOMING_MAX_CONNECTIONS", "-1",
+		"WHISPER_HUB_WYOMING_PROGRAM_NAME", "kitchen",
+	)))
+	for k, want := range map[string]any{
+		"hub.queue_length": 7, "hub.priority_aging": "-1s", "auth.rate_limit.failures": -1,
+		"wyoming.max_connections": -1, "wyoming.program_name": "kitchen", "wyoming.zeroconf.name": "kitchen",
+	} {
+		if flat[k] != want {
+			t.Errorf("%s = %v, want %v", k, flat[k], want)
+		}
+	}
+
+	_, self, _, _ := runtime.Caller(0)
+	raw, err := os.ReadFile(filepath.Join(filepath.Dir(self), "..", "..", "deploy", "whisper-hub.example.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc map[string]any
+	if err := yaml.Unmarshal(raw, &doc); err != nil {
+		t.Fatal(err)
+	}
+	example := map[string]any{}
+	leaves("", doc, example)
+	for k := range flat {
+		if _, ok := example[k]; !ok {
+			t.Errorf("%s is printed but missing from the example file", k)
+		}
+	}
+	for k := range example {
+		if _, ok := flat[k]; !ok {
+			t.Errorf("%s is in the example file but not printed", k)
+		}
 	}
 }

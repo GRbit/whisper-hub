@@ -213,8 +213,22 @@ func (c *Config) validate() error {
 	return nil
 }
 
-// YAML renders the effective configuration, for the config subcommand.
-func (c Config) YAML() ([]byte, error) { return yaml.Marshal(c) }
+// YAML renders the effective configuration, for the config subcommand:
+// every zero value is shown as the default its package resolves it to.
+func (c Config) YAML() ([]byte, error) { return yaml.Marshal(c.resolved()) }
+
+// resolved asks each package for its own defaults, so they are known in
+// exactly one place: the function its constructor goes through too.
+func (c Config) resolved() Config {
+	c.Audio = c.Audio.Resolved()
+	c.Hub = c.Hub.Resolved()
+	c.Auth = c.Auth.Resolved()
+	c.Legacy = c.Legacy.Resolved()
+	c.OpenAI = c.OpenAI.Resolved()
+	c.Wyoming.Config = c.Wyoming.Config.Resolved()
+	c.Worker = c.Worker.Resolved()
+	return c
+}
 
 // applyCompat maps the environment of a whisper-asr-webservice deployment.
 // It reports whether the sidecar bundled mode is on, in which case the

@@ -49,7 +49,7 @@ func run(args []string, stdin *os.File, stdout, stderr io.Writer) int {
 		err = healthcheck(args, stderr)
 	case "config":
 		var cfg config.Config
-		if cfg, err = config.Load(args, os.LookupEnv, stderr); err == nil {
+		if cfg, err = load(args, stderr); err == nil {
 			var b []byte
 			if b, err = cfg.YAML(); err == nil {
 				_, err = stdout.Write(b)
@@ -74,8 +74,17 @@ func run(args []string, stdin *os.File, stdout, stderr io.Writer) int {
 	return 0
 }
 
-func serve(args []string, stderr io.Writer) error {
+// load is config.Load plus the one default only the binary knows.
+func load(args []string, stderr io.Writer) (config.Config, error) {
 	cfg, err := config.Load(args, os.LookupEnv, stderr)
+	if err == nil && cfg.Wyoming.Version == "" {
+		cfg.Wyoming.Version = version
+	}
+	return cfg, err
+}
+
+func serve(args []string, stderr io.Writer) error {
+	cfg, err := load(args, stderr)
 	if err != nil {
 		return err
 	}

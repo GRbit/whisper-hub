@@ -75,16 +75,11 @@ const (
 	UnknownModelError   = "error"
 )
 
-func (c Config) withDefaults() (Config, error) {
-	if len(c.Workers) == 0 {
-		return c, errors.New("hub: no workers configured")
-	}
-	switch c.UnknownModel {
-	case "":
+// Resolved returns c with every zero value replaced by the default it
+// stands for, as New uses it. It does not validate; New does.
+func (c Config) Resolved() Config {
+	if c.UnknownModel == "" {
 		c.UnknownModel = UnknownModelDefault
-	case UnknownModelDefault, UnknownModelError:
-	default:
-		return c, fmt.Errorf("hub: unknown_model must be %q or %q, got %q", UnknownModelDefault, UnknownModelError, c.UnknownModel)
 	}
 	aliases := map[string]string{"whisper-1": ""}
 	for k, v := range c.Aliases {
@@ -110,18 +105,34 @@ func (c Config) withDefaults() (Config, error) {
 	if c.FailThreshold <= 0 {
 		c.FailThreshold = 2
 	}
-	ws := slices.Clone(c.Workers)
-	seen := map[string]bool{}
-	for i := range ws {
-		if ws[i].MaxInFlight <= 0 {
-			ws[i].MaxInFlight = 1
+	// The worker client owns these defaults; the hub only renames them.
+	wc := workerclient.Config{ConnectTimeout: c.ConnectTimeout, FirstByteTimeout: c.FirstByteTimeout,
+		RequestTimeout: c.ProbeTimeout}.Resolved()
+	c.ConnectTimeout, c.FirstByteTimeout, c.ProbeTimeout = wc.ConnectTimeout, wc.FirstByteTimeout, wc.RequestTimeout
+	c.Workers = slices.Clone(c.Workers)
+	for i := range c.Workers {
+		if c.Workers[i].MaxInFlight <= 0 {
+			c.Workers[i].MaxInFlight = 1
 		}
-		if seen[ws[i].URL] {
-			return c, fmt.Errorf("hub: worker %q listed twice", ws[i].URL)
-		}
-		seen[ws[i].URL] = true
 	}
-	c.Workers = ws
+	return c
+}
+
+func (c Config) withDefaults() (Config, error) {
+	c = c.Resolved()
+	if len(c.Workers) == 0 {
+		return c, errors.New("hub: no workers configured")
+	}
+	if c.UnknownModel != UnknownModelDefault && c.UnknownModel != UnknownModelError {
+		return c, fmt.Errorf("hub: unknown_model must be %q or %q, got %q", UnknownModelDefault, UnknownModelError, c.UnknownModel)
+	}
+	seen := map[string]bool{}
+	for _, w := range c.Workers {
+		if seen[w.URL] {
+			return c, fmt.Errorf("hub: worker %q listed twice", w.URL)
+		}
+		seen[w.URL] = true
+	}
 	return c, nil
 }
 

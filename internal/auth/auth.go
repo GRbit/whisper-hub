@@ -37,7 +37,7 @@ var (
 // specific wins) to the writer of that API's authentication failure, for
 // example {"/v1/": openaiapi.WriteError}. May be nil.
 func New(cfg Config, rejecters map[string]func(w http.ResponseWriter, err error)) (*Auth, error) {
-	cfg = cfg.withDefaults()
+	cfg = cfg.Resolved()
 	cidrs, err := parseCIDRs(cfg.Wyoming.AllowCIDRs)
 	if err != nil {
 		return nil, err

@@ -58,6 +58,18 @@ type Proc struct {
 	err     error
 }
 
+// Resolved returns c with every zero value replaced by the default it
+// stands for, as Env and Start use it. An empty Command stays empty.
+func (c Config) Resolved() Config {
+	if c.ImageTag == "" {
+		c.ImageTag = "whisper-hub:%s"
+	}
+	if c.StopTimeout <= 0 {
+		c.StopTimeout = 10 * time.Second
+	}
+	return c
+}
+
 // Env returns env adjusted for the worker: ASR_ENGINE defaults to the
 // installed engine instead of upstream's openai_whisper, and asking for an
 // engine the image lacks is an error naming the image that has it.
@@ -81,10 +93,7 @@ func (c Config) Env(env []string) ([]string, error) {
 	if slices.Contains(installed, requested) {
 		return env, nil
 	}
-	tag := c.ImageTag
-	if tag == "" {
-		tag = "whisper-hub:%s"
-	}
+	tag := c.Resolved().ImageTag
 	if !slices.Contains(Engines, requested) {
 		return nil, fmt.Errorf("ASR_ENGINE=%q is not an engine (%s)", requested, strings.Join(Engines, ", "))
 	}
@@ -113,10 +122,7 @@ func Start(c Config, env []string, log *slog.Logger) (*Proc, error) {
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("start engine worker: %w", err)
 	}
-	p := &Proc{cmd: cmd, log: log, timeout: c.StopTimeout, done: make(chan struct{})}
-	if p.timeout <= 0 {
-		p.timeout = 10 * time.Second
-	}
+	p := &Proc{cmd: cmd, log: log, timeout: c.Resolved().StopTimeout, done: make(chan struct{})}
 	log.Info("engine worker started", "pid", cmd.Process.Pid, "command", c.Command)
 	go func() {
 		p.err = cmd.Wait()

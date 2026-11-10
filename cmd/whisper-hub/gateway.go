@@ -82,13 +82,7 @@ func newGateway(ctx context.Context, cfg config.Config, log *slog.Logger) (_ *ga
 		}
 	}
 	if cfg.Wyoming.Enabled {
-		wc := cfg.Wyoming.Config
-		if wc.Listen == "" {
-			wc.Listen = ":10300"
-		}
-		if wc.Version == "" {
-			wc.Version = version
-		}
+		wc := cfg.Wyoming.Config.Resolved()
 		if g.wy, err = wyoming.New(wc, g.hub, dec, g.auth.WyomingIdentity, log); err != nil {
 			return nil, err
 		}

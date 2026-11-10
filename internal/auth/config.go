@@ -9,12 +9,13 @@ package auth
 import (
 	"fmt"
 	"net/netip"
+	"slices"
 	"time"
 )
 
 // Config configures authentication, model access and usage accounting.
 //
-// Zero values mean the documented default; see withDefaults.
+// Zero values mean the documented default; see Resolved.
 type Config struct {
 	// UsersFile is the users file. Empty (the default) turns authentication
 	// off: every request is anonymous, as upstream whisper-asr-webservice.
@@ -109,7 +110,9 @@ const (
 // is empty.
 var defaultProtectedPaths = []string{"/asr", "/detect-language", "/v1/"}
 
-func (c Config) withDefaults() Config {
+// Resolved returns c with every zero value replaced by the default it
+// stands for, as New uses it.
+func (c Config) Resolved() Config {
 	if c.PollInterval == 0 {
 		c.PollInterval = defaultPollInterval
 	}
@@ -117,7 +120,7 @@ func (c Config) withDefaults() Config {
 		c.Realm = defaultRealm
 	}
 	if len(c.ProtectedPaths) == 0 {
-		c.ProtectedPaths = defaultProtectedPaths
+		c.ProtectedPaths = slices.Clone(defaultProtectedPaths)
 	}
 	if c.RateLimit.Failures == 0 {
 		c.RateLimit.Failures = defaultRateFailures
@@ -125,11 +128,11 @@ func (c Config) withDefaults() Config {
 	if c.RateLimit.Window <= 0 {
 		c.RateLimit.Window = defaultRateWindow
 	}
-	c.Usage = c.Usage.withDefaults()
+	c.Usage = c.Usage.resolved()
 	return c
 }
 
-func (c UsageConfig) withDefaults() UsageConfig {
+func (c UsageConfig) resolved() UsageConfig {
 	if c.SnapshotInterval <= 0 {
 		c.SnapshotInterval = defaultSnapshotInterval
 	}
